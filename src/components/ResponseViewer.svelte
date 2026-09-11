@@ -2,15 +2,19 @@
   import { Check, Clock3, Copy, Download, FileJson, Search, WrapText } from '@lucide/svelte';
   import JsonGrid from './JsonGrid.svelte';
   import type { ResponseData } from '../lib/types';
+  import type { ScriptConsoleEntry, ScriptTestOutcome } from '../lib/scripting';
 
   export let response: ResponseData | null = null;
   export let loading = false;
   export let error = '';
+  export let testResults: ScriptTestOutcome[] = [];
+  export let consoleLogs: ScriptConsoleEntry[] = [];
+  export let scriptError = '';
 
   type BodyView = 'pretty' | 'raw' | 'grid';
   type GridData = { value: unknown; message: string };
 
-  let tab: 'body' | 'headers' | 'info' = 'body';
+  let tab: 'body' | 'headers' | 'tests' | 'console' | 'info' = 'body';
   let view: BodyView = 'pretty';
   let copied = false;
   let downloaded = false;
@@ -24,6 +28,7 @@
   $: matchCount = view === 'grid'
     ? countGridMatches(gridData.value, query)
     : highlightedSegments.filter((segment) => segment.match).length;
+  $: passedTestCount = testResults.filter((test) => test.passed).length;
 
   function formatBody(body: string, contentType: string, mode: BodyView) {
     if (mode === 'raw') return body;
@@ -100,6 +105,12 @@
       <button class:active={tab === 'headers'} on:click={() => tab = 'headers'}>
         Headers {response ? `(${response.headers.length})` : ''}
       </button>
+      <button class:active={tab === 'tests'} on:click={() => tab = 'tests'}>
+        Tests {#if testResults.length}<span>{passedTestCount}/{testResults.length}</span>{/if}
+      </button>
+      <button class:active={tab === 'console'} on:click={() => tab = 'console'}>
+        Console {#if consoleLogs.length}<span>{consoleLogs.length}</span>{/if}
+      </button>
       <button class:active={tab === 'info'} on:click={() => tab = 'info'}>Info</button>
     </div>
     {#if response}
@@ -165,6 +176,29 @@
       {#each response.headers as header}
         <div><span>{header.key}</span><code>{header.value}</code></div>
       {/each}
+    </div>
+  {:else if tab === 'tests'}
+    <div class="response-tests">
+      {#if scriptError}<div class="script-error">{scriptError}</div>{/if}
+      {#each testResults as test}
+        <div class="test-row" class:passed={test.passed} class:failed={!test.passed}>
+          <span class="test-icon">{test.passed ? '✓' : '✕'}</span>
+          <span class="test-name">{test.name}</span>
+          {#if test.error}<small>{test.error}</small>{/if}
+        </div>
+      {/each}
+      {#if !testResults.length && !scriptError}
+        <div class="grid-empty">Add a post-response script in the Scripts tab to see assertions here.</div>
+      {/if}
+    </div>
+  {:else if tab === 'console'}
+    <div class="response-console">
+      {#each consoleLogs as entry}
+        <div class="console-line console-{entry.level}"><span>{entry.level}</span><code>{entry.text}</code></div>
+      {/each}
+      {#if !consoleLogs.length}
+        <div class="grid-empty">console.log output from your pre-request and test scripts will appear here.</div>
+      {/if}
     </div>
   {:else}
     <div class="response-info">

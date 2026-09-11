@@ -2,6 +2,7 @@
   import { FileUp, Plus, Trash2 } from '@lucide/svelte';
   import type { FormDataRow } from '../lib/types';
   import { blankFormRow } from '../lib/types';
+  import CustomSelect from './CustomSelect.svelte';
 
   export let rows: FormDataRow[];
   export let onChange: () => void = () => {};
@@ -57,9 +58,12 @@
       <label class="check-wrap" title={row.enabled ? 'Disable row' : 'Enable row'}>
         <input type="checkbox" bind:checked={row.enabled} on:change={() => commit()} /><span class="custom-check"></span>
       </label>
-      <select value={row.kind} on:change={(event) => setKind(row, event.currentTarget.value as 'text' | 'file')} aria-label="Field type">
-        <option value="text">Text</option><option value="file">File</option>
-      </select>
+      <CustomSelect
+        value={row.kind}
+        options={[{ value: 'text', label: 'Text' }, { value: 'file', label: 'File' }]}
+        onChange={(kind) => setKind(row, kind)}
+        ariaLabel="Field type"
+      />
       <input bind:value={row.key} on:input={() => commit(index)} placeholder="Key" aria-label="Form key" />
       {#if row.kind === 'file'}
         <label class="file-cell" title={row.fileName ?? 'Choose file'}>

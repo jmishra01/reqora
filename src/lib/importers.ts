@@ -171,19 +171,19 @@ function inferRawMode(body: string, contentType: string): BodyMode {
   try { JSON.parse(body); return 'json'; } catch { return 'text'; }
 }
 
-export function parsePostmanCollection(source: string): Collection {
+export function parseCollectionFile(source: string): Collection {
   let parsed: unknown;
   try { parsed = JSON.parse(source); } catch { throw new Error('The selected file is not valid JSON.'); }
   const root = object(parsed);
   const info = object(root.info);
   const name = string(info.name, string(root.name, 'Imported Collection')).trim() || 'Imported Collection';
   if (!Array.isArray(root.item) && !Array.isArray(root.requests)) {
-    throw new Error('This JSON file is not a Postman Collection v2 or v2.1 file.');
+    throw new Error('This JSON file is not a supported collection format (v2 or v2.1).');
   }
 
   const collection: Collection = {
     id: uid(), name, description: descriptionText(info.description ?? root.description), expanded: true,
-    variables: rowsWithBlank(variableRows(root.variable)), auth: postmanAuth(root.auth, false), requests: [], folders: []
+    variables: rowsWithBlank(variableRows(root.variable)), auth: readAuth(root.auth, false), requests: [], folders: []
   };
   visitItems(array(root.item), collection, []);
   return collection;
@@ -198,7 +198,7 @@ function visitItems(items: unknown[], collection: Collection, parents: string[])
       ensureFolder(collection, path, item);
       visitItems(item.item, collection, path);
     } else if (item.request) {
-      const request = postmanRequest(itemName, item);
+      const request = readRequest(itemName, item);
       if (!parents.length) collection.requests.push(request);
       else ensureFolder(collection, parents).requests.push(request);
     }
@@ -211,28 +211,28 @@ function ensureFolder(collection: Collection, path: string[], item?: JsonObject)
   if (!folder) {
     folder = {
       id: uid(), name, expanded: true, variables: rowsWithBlank(variableRows(item?.variable)),
-      auth: postmanAuth(item?.auth, true), requests: []
+      auth: readAuth(item?.auth, true), requests: []
     };
     collection.folders.push(folder);
   }
   return folder;
 }
 
-function postmanRequest(name: string, item: JsonObject): ApiRequest {
+function readRequest(name: string, item: JsonObject): ApiRequest {
   const source = item.request;
   const definition = typeof source === 'string' ? { url: source } : object(source);
   const request = blankRequest(name);
   request.method = string(definition.method, 'GET').toUpperCase();
-  const importedUrl = postmanUrl(definition.url);
+  const importedUrl = readUrl(definition.url);
   request.url = stripQuery(importedUrl);
-  request.params = rowsWithBlank(postmanQueryRows(definition.url, importedUrl));
+  request.params = rowsWithBlank(readQueryRows(definition.url, importedUrl));
   request.pathParams = rowsWithBlank(variableRows(object(definition.url).variable));
   request.headers = rowsWithBlank(array(definition.header).map((value) => {
     const header = object(value);
     return { id: uid(), key: string(header.key), value: string(header.value), description: descriptionText(header.description), enabled: !header.disabled };
   }).filter((row) => row.key));
-  request.auth = postmanAuth(definition.auth, true);
-  applyPostmanBody(request, object(definition.body));
+  request.auth = readAuth(definition.auth, true);
+  applyBody(request, object(definition.body));
   for (const eventValue of array(item.event)) {
     const event = object(eventValue);
     const script = object(event.script);
@@ -243,7 +243,7 @@ function postmanRequest(name: string, item: JsonObject): ApiRequest {
   return request;
 }
 
-function postmanUrl(value: unknown): string {
+function readUrl(value: unknown): string {
   if (typeof value === 'string') return value;
   const url = object(value);
   if (typeof url.raw === 'string') return url.raw;
@@ -262,7 +262,7 @@ function stripQuery(value: string): string {
   return `${value.slice(0, queryIndex)}${hashIndex >= 0 ? value.slice(hashIndex) : ''}`;
 }
 
-function postmanQueryRows(value: unknown, raw: string): KeyValue[] {
+function readQueryRows(value: unknown, raw: string): KeyValue[] {
   const url = object(value);
   const defined = array(url.query).map((entry) => {
     const row = object(entry);
@@ -277,7 +277,7 @@ function postmanQueryRows(value: unknown, raw: string): KeyValue[] {
   return [...new URLSearchParams(query)].map(([key, value]) => ({ id: uid(), key, value, enabled: true }));
 }
 
-function applyPostmanBody(request: ApiRequest, body: JsonObject) {
+function applyBody(request: ApiRequest, body: JsonObject) {
   const mode = string(body.mode);
   if (mode === 'raw') {
     request.body = string(body.raw);
@@ -286,10 +286,10 @@ function applyPostmanBody(request: ApiRequest, body: JsonObject) {
       ?? inferRawMode(request.body, '');
   } else if (mode === 'urlencoded') {
     request.bodyMode = 'urlencoded';
-    request.formData = formRowsWithBlank(postmanFormRows(body.urlencoded));
+    request.formData = formRowsWithBlank(readFormRows(body.urlencoded));
   } else if (mode === 'formdata') {
     request.bodyMode = 'form';
-    request.formData = formRowsWithBlank(postmanFormRows(body.formdata));
+    request.formData = formRowsWithBlank(readFormRows(body.formdata));
   } else if (mode === 'graphql') {
     request.bodyMode = 'graphql';
     const graphql = object(body.graphql);
@@ -306,7 +306,7 @@ function applyPostmanBody(request: ApiRequest, body: JsonObject) {
   }
 }
 
-function postmanFormRows(value: unknown): FormDataRow[] {
+function readFormRows(value: unknown): FormDataRow[] {
   return array(value).map((entry) => {
     const row = object(entry);
     const file = row.type === 'file';
@@ -326,7 +326,7 @@ function variableRows(value: unknown): KeyValue[] {
   }).filter((row) => row.key);
 }
 
-function postmanAuth(value: unknown, inheritWhenMissing: boolean): RequestAuth {
+function readAuth(value: unknown, inheritWhenMissing: boolean): RequestAuth {
   const auth = object(value);
   const type = string(auth.type);
   if (!type) return { type: inheritWhenMissing ? 'inherit' : 'none' };

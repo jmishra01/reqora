@@ -197,14 +197,20 @@ export function parsePostmanEnvironment(source: string): { environment: Environm
     throw new Error('This JSON file is not a Postman Environment file.');
   }
   const name = string(root.name, 'Imported Environment').trim() || 'Imported Environment';
-  const variables = array(root.values).map((entry) => {
+  const rawValues = array(root.values);
+  const variables = rawValues.map((entry) => {
     const row = object(entry);
-    return { id: uid(), key: string(row.key), value: string(row.value), description: descriptionText(row.description), enabled: row.enabled !== false, secret: row.type === 'secret' };
+    return { id: uid(), key: string(row.key).trim(), value: string(row.value), description: descriptionText(row.description), enabled: row.enabled !== false, secret: row.type === 'secret' };
   }).filter((row) => row.key);
   const environment = { id: uid(), name, variables: rowsWithBlank(variables) };
-  const warning = root._postman_variable_scope === 'globals'
-    ? `"${name}" looks like a Postman Globals export, not an Environment — imported as a regular environment.`
-    : undefined;
+  const warnings: string[] = [];
+  if (root._postman_variable_scope === 'globals') {
+    warnings.push(`"${name}" looks like a Postman Globals export, not an Environment — imported as a regular environment.`);
+  }
+  if (rawValues.length > 0 && variables.length === 0) {
+    warnings.push(`"${name}" imported with no usable variables — every entry had an empty or invalid key.`);
+  }
+  const warning = warnings.length ? warnings.join(' ') : undefined;
   return { environment, warning };
 }
 

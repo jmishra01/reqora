@@ -145,13 +145,13 @@
           <button class="icon-button" on:click={onDeleteHistory} title="Clear history"><Trash2 size={14} /></button>
         {/if}
       {:else if activeSection === 'collections'}
-        <input class="hidden-file-input" bind:this={collectionFileInput} type="file" accept="application/json,.json,.postman_collection" multiple on:change={(event) => { onImportCollections(event.currentTarget.files); event.currentTarget.value = ''; }} />
+        <input class="hidden-file-input" bind:this={collectionFileInput} type="file" accept="application/json,.json" multiple on:change={(event) => { onImportCollections(event.currentTarget.files); event.currentTarget.value = ''; }} />
         <button class="icon-button" on:click={() => collectionFileInput.click()} title="Import collection JSON" aria-label="Import collection JSON"><FileUp size={15} /></button>
         <button class="icon-button" on:click={onImportCurl} title="Import cURL" aria-label="Import cURL"><Code2 size={15} /></button>
         <button class="icon-button" on:click={onNewCollection} title="New collection"><FolderPlus size={15} /></button>
         <button class="icon-button" on:click={() => onNewRequest()} title="New request"><Plus size={15} /></button>
       {:else}
-        <input class="hidden-file-input" bind:this={environmentFileInput} type="file" accept="application/json,.json,.postman_environment" multiple on:change={(event) => { onImportEnvironments(event.currentTarget.files); event.currentTarget.value = ''; }} />
+        <input class="hidden-file-input" bind:this={environmentFileInput} type="file" accept="application/json,.json" multiple on:change={(event) => { onImportEnvironments(event.currentTarget.files); event.currentTarget.value = ''; }} />
         <button class="icon-button" on:click={() => environmentFileInput.click()} title="Import environment JSON" aria-label="Import environment JSON"><Inbox size={15} /></button>
         <button class="icon-button" on:click={onNewEnvironment} title="New environment"><Plus size={15} /></button>
       {/if}

@@ -25,8 +25,8 @@ Medium (gets in the way, looks broken) · Low (rough edge).
 | BUG-12 | 2026-11-19 | Environment import icon easy to mistake for "New environment" | Low | Fixed (uncommitted) |
 | BUG-13 | 2026-11-19 | Two import entry points use different label text for the same action | Low | Fixed (uncommitted) |
 | BUG-14 | 2026-11-19 | No visual indication of which environment(s) were just imported | Low | Fixed (uncommitted) |
-| BUG-15 | 2026-11-19 | Environment file picker's `accept` attribute includes a dead, never-matching extension | Low | Open |
-| BUG-16 | 2026-11-19 | Environment importer silently drops/garbles malformed variable entries with no warning | Low | Open |
+| BUG-15 | 2026-11-19 | Environment file picker's `accept` attribute includes a dead, never-matching extension | Low | Fixed (uncommitted) |
+| BUG-16 | 2026-11-19 | Environment importer silently drops/garbles malformed variable entries with no warning | Low | Fixed (uncommitted) |
 | BUG-17 | 2026-11-19 | Command palette has no input to type into, so typing while it's open silently edits the field behind it | High | Fixed (uncommitted) |
 | BUG-18 | 2026-11-19 | "Unsaved changes" is a single global flag shared by every open request tab | High | Fixed (uncommitted) |
 | BUG-19 | 2026-11-19 | Request history only stores status/timing, never the actual response body/headers | High | Fixed (uncommitted) |
@@ -380,38 +380,44 @@ for this pass.
 
 ## BUG-15 — Environment file picker's `accept` attribute includes a dead, never-matching extension
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** PM (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Inspect the file picker's filter.
 
-**Cause:** `src/components/Sidebar.svelte:148` — `accept="application/json,.json,.postman_environment"`.
-Real Postman environment exports are named `*.postman_environment.json`; the actual extension a
-browser/OS matches on is `.json`, so `.postman_environment` never matches anything. Harmless since
-`.json` already covers every real file, but dead weight.
+**Cause:** `src/components/Sidebar.svelte` — both the collection input
+(`accept="application/json,.json,.postman_collection"`) and the environment input
+(`accept="application/json,.json,.postman_environment"`). Real Postman exports are named
+`*.postman_collection.json` / `*.postman_environment.json`; the actual extension a browser/OS
+matches on is `.json`, so the Postman-specific tokens never match anything. Harmless since `.json`
+already covers every real file, but dead weight.
 
-**Suggested fix:** Drop the `.postman_environment` token (or keep it purely for documentation —
-either way it has no functional effect).
+**Fix applied:** Dropped the dead `.postman_collection`/`.postman_environment` tokens from both
+file inputs — verified in the browser that the live `accept` attribute is now
+`application/json,.json`.
 
 ---
 
 ## BUG-16 — Environment importer silently drops/garbles malformed variable entries with no warning
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** PM, QA/Tester (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Import a file where a `values` entry has a non-string `key`/`value` (e.g.
 `{"key":123,"value":"v"}`), or a `key` that is only whitespace (`"   "`), or where every entry
 lacks a usable key.
 
-**Cause:** `src/lib/importers.ts:200-203`. Non-string `key`/`value` silently coerce to `""` via the
-`string()` helper; `.filter((row) => row.key)` treats a whitespace-only string as truthy, so it
-survives as a real (useless) row; an environment whose every entry fails the filter imports as a
-valid environment with zero variables, and the success toast ("1 environment imported") never
-indicates this.
+**Cause:** `src/lib/importers.ts` in `parsePostmanEnvironment`. Non-string `key`/`value` silently
+coerce to `""` via the `string()` helper; `.filter((row) => row.key)` treats a whitespace-only
+string as truthy, so it survives as a real (useless) row; an environment whose every entry fails
+the filter imports as a valid environment with zero variables, and the success toast never
+indicated this.
 
-**Suggested fix:** Low priority. Optionally trim before the truthy check, and warn when an
-imported environment ends up with 0 real variables.
+**Fix applied:** Trim the key before the truthy check (so whitespace-only keys are correctly
+dropped), and surface a toast warning when an imported environment ends up with zero usable
+variables despite the source file having entries. Verified live: importing a file with only
+non-string/whitespace keys now shows "imported with no usable variables — every entry had an
+empty or invalid key" and the environment lands with 0 variables, matching what actually happened.
 
 ---
 

@@ -21,6 +21,7 @@
   import { blankRequest, blankRow, uid } from './lib/types';
   import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, Journey, JourneyExtraction, KeyValue, PostcallWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
   import { getLinkedRepository, type SyncConflict, type SyncError } from './lib/sync';
+  import { runPreRequestScript, type ScriptConsoleEntry } from './lib/scripting';
 
   type SidebarSection = 'collections' | 'history' | 'environments';
   type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'scripts' | 'settings';
@@ -59,6 +60,7 @@
   let response: ResponseData | null = null;
   let requestError = '';
   let executing = false;
+  let preRequestConsole: ScriptConsoleEntry[] = [];
   let saved = true;
   let sidebarVisible = true;
   type AppTheme = 'dark' | 'light' | 'midnight' | 'forest' | 'ocean';
@@ -124,6 +126,8 @@
   let journeyRunning = false;
   let journeyResults: JourneyStepResult[] = [];
   let journeyRunVariables: Record<string, string> = {};
+  let journeyPreview: Record<string, { status?: number; elapsedMs?: number; body?: string; error?: string }> = {};
+  let journeyPreviewLoading: Record<string, boolean> = {};
 
   $: activeRequest = openRequests.find((request) => request.id === activeRequestId) ?? openRequests[0];
   $: activeEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
@@ -239,6 +243,7 @@
     response = null;
     requestError = '';
     requestTab = 'params';
+    preRequestConsole = [];
   }
 
   function switchWorkspace(id: string) {
@@ -321,6 +326,7 @@
     activeRequestId = request.id;
     response = null;
     requestError = '';
+    preRequestConsole = [];
   }
 
   function uniqueEnvironmentName(name: string, existingNames: Set<string>): string {
@@ -390,6 +396,7 @@
       saved = false;
       response = null;
       requestError = '';
+      preRequestConsole = [];
       curlImportOpen = false;
       showToast('cURL imported as a new request');
     } catch (error) {
@@ -408,6 +415,7 @@
     } else saved = false;
     response = null;
     requestError = '';
+    preRequestConsole = [];
   }
 
   function closeRequest(event: Event, id: string) {
@@ -417,6 +425,7 @@
     if (activeRequestId === id) {
       activeRequestId = openRequests[Math.max(0, index - 1)]?.id ?? '';
       response = null;
+      preRequestConsole = [];
     }
     if (!openRequests.length) newRequest();
   }
@@ -783,6 +792,59 @@
     return output;
   }
 
+  async function prepareRequestForSend(request: ApiRequest, runtimeVariables: Record<string, string> = {}) {
+    preRequestConsole = [];
+    if (!request.preRequestScript.trim()) return { request, runtimeVariables };
+
+    const environmentVars = Object.fromEntries(
+      (activeEnvironment?.variables ?? []).filter((row) => row.enabled && row.key).map((row) => [row.key, row.value])
+    );
+    const availableVars = Object.fromEntries(resolvedVariables(request, runtimeVariables).map((item) => [item.key, item.value]));
+    const headerRows = request.headers.filter((row) => row.enabled && row.key).map((row) => ({ key: row.key, value: row.value }));
+
+    const result = await runPreRequestScript(request.preRequestScript, {
+      url: resolveVariables(request.url, request, runtimeVariables),
+      method: request.method,
+      headers: headerRows,
+      variables: availableVars,
+      environment: environmentVars,
+      hasEnvironment: Boolean(activeEnvironment)
+    });
+    preRequestConsole = result.console;
+    if (result.error) throw new Error(`Pre-request script error: ${result.error}`);
+
+    if (Object.keys(result.environmentUpdates).length && activeEnvironment) {
+      const envId = activeEnvironment.id;
+      workspace.environments = workspace.environments.map((environment) => {
+        if (environment.id !== envId) return environment;
+        const variables = [...environment.variables];
+        for (const [key, value] of Object.entries(result.environmentUpdates)) {
+          const index = variables.findIndex((row) => row.key === key);
+          if (index >= 0) variables[index] = { ...variables[index], value, enabled: true };
+          else {
+            const blankIndex = variables.findIndex((row) => !row.key && !row.value);
+            const newRow = { id: uid(), key, value, enabled: true };
+            if (blankIndex >= 0) variables.splice(blankIndex, 0, newRow);
+            else variables.push(newRow);
+          }
+        }
+        return { ...environment, variables };
+      });
+      commitWorkspace();
+    }
+
+    const mergedVariables = { ...runtimeVariables, ...result.variables, ...result.environmentUpdates };
+    let headers = request.headers;
+    for (const header of result.headers) {
+      const lower = header.key.toLowerCase();
+      const index = headers.findIndex((row) => row.key.toLowerCase() === lower);
+      if (index >= 0) headers = headers.map((row, rowIndex) => rowIndex === index ? { ...row, value: header.value, enabled: true } : row);
+      else headers = [...headers, { id: uid(), key: header.key, value: header.value, enabled: true }];
+    }
+    const effectiveRequest = headers === request.headers ? request : { ...request, headers };
+    return { request: effectiveRequest, runtimeVariables: mergedVariables };
+  }
+
   function selectActiveEnvironment(id: string) {
     workspace.activeEnvironmentId = id || null;
     response = null;
@@ -896,7 +958,8 @@
     executing = true;
     let historyEntry: HistoryEntry | null = null;
     try {
-      const { input, inferredProtocol } = buildRequestInput(activeRequest);
+      const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(activeRequest);
+      const { input, inferredProtocol } = buildRequestInput(effectiveRequest, runtimeVariables);
       response = await executeResolvedRequest(input, inferredProtocol);
       historyEntry = {
         id: uid(),
@@ -934,6 +997,8 @@
     journeyEditor = structuredClone(workspace.journeys[0] ?? blankJourney());
     journeyResults = [];
     journeyRunVariables = {};
+    journeyPreview = {};
+    journeyPreviewLoading = {};
     journeyOpen = true;
   }
 
@@ -943,6 +1008,8 @@
     journeyEditor = structuredClone(journey);
     journeyResults = [];
     journeyRunVariables = {};
+    journeyPreview = {};
+    journeyPreviewLoading = {};
   }
 
   function createJourney() {
@@ -950,6 +1017,8 @@
     journeyEditor = blankJourney();
     journeyResults = [];
     journeyRunVariables = {};
+    journeyPreview = {};
+    journeyPreviewLoading = {};
   }
 
   function saveJourney(showConfirmation = true) {
@@ -973,6 +1042,8 @@
     journeyEditor = structuredClone(workspace.journeys[0] ?? blankJourney());
     journeyResults = [];
     journeyRunVariables = {};
+    journeyPreview = {};
+    journeyPreviewLoading = {};
   }
 
   function addJourneyStep() {
@@ -986,6 +1057,7 @@
     journeyEditor.steps = journeyEditor.steps.filter((step) => step.id !== stepId);
     journeyEditor = { ...journeyEditor };
     journeyResults = journeyResults.filter((result) => result.stepId !== stepId);
+    clearJourneyPreview(stepId);
   }
 
   function moveJourneyStep(index: number, direction: -1 | 1) {
@@ -1016,6 +1088,36 @@
 
   function savedRequestById(id: string) {
     return savedRequests.find((item) => item.request.id === id)?.request;
+  }
+
+  async function previewJourneyStep(stepId: string) {
+    if (!journeyEditor || journeyPreviewLoading[stepId]) return;
+    const step = journeyEditor.steps.find((item) => item.id === stepId);
+    const request = step ? savedRequestById(step.requestId) : undefined;
+    if (!request) return;
+    journeyPreviewLoading = { ...journeyPreviewLoading, [stepId]: true };
+    try {
+      const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(request, journeyRunVariables);
+      const { input, inferredProtocol } = buildRequestInput(effectiveRequest, runtimeVariables);
+      const stepResponse = await executeResolvedRequest(input, inferredProtocol);
+      journeyPreview = { ...journeyPreview, [stepId]: { status: stepResponse.status, elapsedMs: stepResponse.elapsedMs, body: stepResponse.body } };
+    } catch (error) {
+      journeyPreview = { ...journeyPreview, [stepId]: { error: error instanceof Error ? error.message : String(error) } };
+    } finally {
+      journeyPreviewLoading = { ...journeyPreviewLoading, [stepId]: false };
+    }
+  }
+
+  function clearJourneyPreview(stepId: string) {
+    if (!(stepId in journeyPreview)) return;
+    const next = { ...journeyPreview };
+    delete next[stepId];
+    journeyPreview = next;
+  }
+
+  function formatPreviewBody(body?: string) {
+    if (!body) return '';
+    try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; }
   }
 
   function readJsonPath(value: unknown, path: string) {
@@ -1079,7 +1181,9 @@
       const request = savedRequestById(step.requestId)!;
       updateJourneyResult(step.id, { state: 'running' });
       try {
-        const { input, inferredProtocol } = buildRequestInput(request, journeyRunVariables);
+        const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(request, journeyRunVariables);
+        journeyRunVariables = runtimeVariables;
+        const { input, inferredProtocol } = buildRequestInput(effectiveRequest, journeyRunVariables);
         const stepResponse = await executeResolvedRequest(input, inferredProtocol);
         const extracted: Record<string, string> = {};
         for (const extraction of step.extractions) {
@@ -1455,7 +1559,7 @@
         <button class="sidebar-toggle" on:click={() => sidebarVisible = !sidebarVisible} title="Toggle sidebar"><PanelLeftClose size={16} /></button>
         <div class="request-tabs">
           {#each openRequests as request (request.id)}
-            <button class="request-tab" class:active={request.id === activeRequestId} on:click={() => { activeRequestId = request.id; response = null; requestError = ''; }}>
+            <button class="request-tab" class:active={request.id === activeRequestId} on:click={() => { activeRequestId = request.id; response = null; requestError = ''; preRequestConsole = []; }}>
               <span class="method mini {request.method.toLowerCase()}">{request.method.slice(0, 3)}</span>
               <span>{request.name}</span>
               {#if request.id === activeRequestId && !saved}<i></i>{/if}
@@ -1593,8 +1697,16 @@
                 {/if}
               {:else if requestTab === 'scripts'}
                 <div class="script-grid">
-                  <div><div class="script-heading"><span><Play size={13} /> Pre-request</span><small>JavaScript</small></div><CodeEditor bind:value={activeRequest.preRequestScript} language="javascript" onChange={markChanged} /></div>
-                  <div><div class="script-heading"><span><Sparkles size={13} /> Post-response tests</span><small>JavaScript</small></div><CodeEditor bind:value={activeRequest.testScript} language="javascript" onChange={markChanged} /></div>
+                  <div>
+                    <div class="script-heading"><span><Play size={13} /> Pre-request</span><small title="pm.variables.get/set · pm.environment.get/set · pm.request.url · pm.request.method · pm.request.headers.get/add/upsert · console.log">JavaScript</small></div>
+                    <CodeEditor bind:value={activeRequest.preRequestScript} language="javascript" onChange={markChanged} />
+                    {#if preRequestConsole.length}
+                      <div class="script-console">
+                        {#each preRequestConsole as entry}<div class="script-console-line {entry.level}">{entry.message}</div>{/each}
+                      </div>
+                    {/if}
+                  </div>
+                  <div><div class="script-heading"><span><Sparkles size={13} /> Post-response tests</span><small title="Not executed yet">JavaScript</small></div><CodeEditor bind:value={activeRequest.testScript} language="javascript" onChange={markChanged} /></div>
                 </div>
               {:else}
                 <div class="request-settings">
@@ -1679,16 +1791,29 @@
               <div class="journey-steps">
                 {#each journeyEditor.steps as step, index (step.id)}
                   {@const result = journeyResults.find((item) => item.stepId === step.id)}
+                  {@const preview = journeyPreview[step.id] ?? (result?.response ? { status: result.response.status, elapsedMs: result.response.elapsedMs, body: result.response.body } : null)}
                   <section class="journey-step" class:running={result?.state === 'running'} class:passed={result?.state === 'passed'} class:failed={result?.state === 'failed'} class:skipped={result?.state === 'skipped'}>
                     <div class="journey-step-header">
                       <span class="journey-step-number">{index + 1}</span>
                       <div><strong>{savedRequestById(step.requestId)?.name ?? 'Choose a request'}</strong><small>{result ? result.state : 'Ready'}</small></div>
+                      <button class="journey-preview-trigger" on:click={() => previewJourneyStep(step.id)} disabled={journeyRunning || journeyPreviewLoading[step.id]} title="Send just this request to see an example response">
+                        {#if journeyPreviewLoading[step.id]}<RefreshCw size={13} class="spinning" />{:else}<Eye size={13} />{/if} Preview
+                      </button>
                       <button on:click={() => moveJourneyStep(index, -1)} disabled={index === 0} title="Move step up"><ChevronUp size={14} /></button>
                       <button on:click={() => moveJourneyStep(index, 1)} disabled={index === journeyEditor.steps.length - 1} title="Move step down"><ChevronDown size={14} /></button>
                       <button class="journey-remove" on:click={() => removeJourneyStep(step.id)} title="Remove step"><Trash2 size={13} /></button>
                     </div>
                     <label class="journey-request-select"><span>Saved request</span><select bind:value={step.requestId}>{#each savedRequests as option}<option value={option.request.id}>{option.label}</option>{/each}</select></label>
-                    <div class="journey-output-heading"><div><strong>Response outputs</strong><small>Available only to the steps below this one</small></div><button on:click={() => addJourneyExtraction(step.id)}><Plus size={12} /> Add output</button></div>
+                    {#if preview}
+                      <div class="journey-preview">
+                        <div class="journey-preview-heading">
+                          <span>Example response{#if preview.status}<b>HTTP {preview.status}</b>{/if}{#if preview.elapsedMs}<small>{preview.elapsedMs} ms</small>{/if}</span>
+                          <button on:click={() => clearJourneyPreview(step.id)} title="Hide example response"><X size={12} /></button>
+                        </div>
+                        {#if preview.error}<p class="journey-preview-error">{preview.error}</p>{:else}<pre class="journey-preview-body">{formatPreviewBody(preview.body)}</pre>{/if}
+                      </div>
+                    {/if}
+                    <div class="journey-output-heading"><div><strong>Response outputs</strong><small>{#if preview}Pick a JSON path from the example response above.{:else}Available only to the steps below this one{/if}</small></div><button on:click={() => addJourneyExtraction(step.id)}><Plus size={12} /> Add output</button></div>
                     {#each step.extractions as extraction (extraction.id)}
                       <div class="journey-extraction">
                         <input bind:value={extraction.name} placeholder="variableName" aria-label="Output variable name" />

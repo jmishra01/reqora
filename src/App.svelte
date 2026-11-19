@@ -14,7 +14,7 @@
   import SyncSettings from './components/SyncSettings.svelte';
   import { executeRequest, getProcessMetrics, loadBrowserWorkspace, loadWorkspace, openStorageLocation, saveWorkspace } from './lib/bridge';
   import type { ProcessMetrics } from './lib/bridge';
-  import { parseCurlCommand, parsePostmanCollection } from './lib/importers';
+  import { parseCurlCommand, parsePostmanCollection, parsePostmanEnvironment } from './lib/importers';
   import { codeLanguageOptions, generateRequestCode } from './lib/codegen';
   import type { CodeLanguage } from './lib/codegen';
   import { blankWorkspace, initialWorkspaceStore, normalizeRequest, normalizeWorkspaceStore } from './lib/workspace';
@@ -72,6 +72,7 @@
   let bulkText = '';
   let utilityModal: UtilityModal = null;
   let pendingDeleteCollection: Collection | null = null;
+  let pendingDeleteEnvironment: Environment | null = null;
   let pendingDeleteWorkspace: PostcallWorkspace | null = null;
   let createWorkspaceOpen = false;
   let workspaceNameInput = '';
@@ -322,21 +323,57 @@
     requestError = '';
   }
 
+  function uniqueEnvironmentName(name: string, existingNames: Set<string>): string {
+    if (!existingNames.has(name)) return name;
+    let suffix = 2;
+    while (existingNames.has(`${name} (${suffix})`)) suffix += 1;
+    return `${name} (${suffix})`;
+  }
+
   async function importCollectionFiles(files: FileList | null) {
     if (!files?.length) return;
-    let imported = 0;
-    try {
-      for (const file of Array.from(files)) {
-        const collection = parsePostmanCollection(await file.text());
-        workspace.collections.push(collection);
-        imported += 1;
+    const fileArray = Array.from(files);
+    const collections: Collection[] = [];
+    const failures: string[] = [];
+    for (const file of fileArray) {
+      try {
+        collections.push(parsePostmanCollection(await file.text()));
+      } catch (error) {
+        failures.push(`${file.name}: ${error instanceof Error ? error.message : 'import failed'}`);
       }
+    }
+    if (collections.length) {
+      workspace.collections.push(...collections);
       activeSection = 'collections';
       commitWorkspace();
-      showToast(`${imported} collection${imported === 1 ? '' : 's'} imported`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Collection import failed');
     }
+    const summary = `${collections.length} of ${fileArray.length} collection${fileArray.length === 1 ? '' : 's'} imported`;
+    showToast(failures.length ? `${summary} — ${failures.join('; ')}` : `${collections.length} collection${collections.length === 1 ? '' : 's'} imported`);
+  }
+
+  async function importEnvironmentFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const fileArray = Array.from(files);
+    const existingNames = new Set(workspace.environments.map((item) => item.name));
+    const environments: Environment[] = [];
+    const failures: string[] = [];
+    for (const file of fileArray) {
+      try {
+        const environment = parsePostmanEnvironment(await file.text());
+        environment.name = uniqueEnvironmentName(environment.name, existingNames);
+        existingNames.add(environment.name);
+        environments.push(environment);
+      } catch (error) {
+        failures.push(`${file.name}: ${error instanceof Error ? error.message : 'import failed'}`);
+      }
+    }
+    if (environments.length) {
+      workspace.environments.push(...environments);
+      activeSection = 'environments';
+      commitWorkspace();
+    }
+    const summary = `${environments.length} of ${fileArray.length} environment${fileArray.length === 1 ? '' : 's'} imported`;
+    showToast(failures.length ? `${summary} — ${failures.join('; ')}` : `${environments.length} environment${environments.length === 1 ? '' : 's'} imported`);
   }
 
   function openCurlImport() {
@@ -676,6 +713,41 @@
     workspace.activeEnvironmentId = environmentEditor.id;
     environmentEditor = null;
     commitWorkspace();
+  }
+
+  function exportEnvironment(environment: Environment) {
+    const output = {
+      name: environment.name,
+      values: environment.variables.filter((row) => row.key).map(({ key, value, enabled, description, secret }) => ({
+        key, value, type: secret ? 'secret' : 'default', enabled,
+        ...(description ? { description } : {})
+      })),
+      _postman_variable_scope: 'environment'
+    };
+    const href = URL.createObjectURL(new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = `${environment.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'environment'}.postman_environment.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    showToast('Environment exported');
+  }
+
+  function deleteEnvironment(environment: Environment) {
+    pendingDeleteEnvironment = environment;
+  }
+
+  function confirmDeleteEnvironment() {
+    const environment = pendingDeleteEnvironment;
+    if (!environment) return;
+    workspace.environments = workspace.environments.filter((item) => item.id !== environment.id);
+    if (workspace.activeEnvironmentId === environment.id) workspace.activeEnvironmentId = null;
+    if (environmentEditor?.id === environment.id) environmentEditor = null;
+    pendingDeleteEnvironment = null;
+    commitWorkspace();
+    showToast('Environment deleted');
   }
 
   function requestScope(request: ApiRequest) {
@@ -1356,10 +1428,13 @@
         onNewRequest={() => newRequest()}
         onNewCollection={newCollection}
         onNewEnvironment={newEnvironment}
+        onImportEnvironments={importEnvironmentFiles}
         onDeleteHistory={() => { workspace.history = []; commitWorkspace(); }}
         onToggleCollection={toggleCollection}
         onToggleFolder={toggleFolder}
         onSelectEnvironment={editEnvironment}
+        onExportEnvironment={exportEnvironment}
+        onDeleteEnvironment={deleteEnvironment}
         onAddRequestToCollection={(collection) => newRequest(collection)}
         onAddFolder={addFolder}
         onRenameCollection={renameCollection}
@@ -1872,6 +1947,17 @@
         <strong>Delete “{pendingDeleteCollection.name}”?</strong>
         <p>This removes the collection, its {pendingDeleteCollection.requests.length + pendingDeleteCollection.folders.reduce((total, folder) => total + folder.requests.length, 0)} requests, and all folders from this local workspace.</p>
         <div class="modal-footer"><button class="secondary-button" on:click={() => pendingDeleteCollection = null}>Cancel</button><button class="danger-button" on:click={confirmDeleteCollection}>Delete collection</button></div>
+      </div>
+    </div>
+  {/if}
+
+  {#if pendingDeleteEnvironment}
+    <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget) pendingDeleteEnvironment = null; }}>
+      <div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Delete environment">
+        <div class="confirm-mark">!</div>
+        <strong>Delete “{pendingDeleteEnvironment.name}”?</strong>
+        <p>This removes the environment and its {pendingDeleteEnvironment.variables.filter((row) => row.key).length} variables from this local workspace.</p>
+        <div class="modal-footer"><button class="secondary-button" on:click={() => pendingDeleteEnvironment = null}>Cancel</button><button class="danger-button" on:click={confirmDeleteEnvironment}>Delete environment</button></div>
       </div>
     </div>
   {/if}

@@ -1,5 +1,5 @@
 import { blankFormRow, blankRequest, blankRow, uid } from './types';
-import type { ApiRequest, BodyMode, Collection, CollectionFolder, FormDataRow, KeyValue, RequestAuth } from './types';
+import type { ApiRequest, BodyMode, Collection, CollectionFolder, Environment, FormDataRow, KeyValue, RequestAuth } from './types';
 
 type JsonObject = Record<string, unknown>;
 
@@ -187,6 +187,21 @@ export function parsePostmanCollection(source: string): Collection {
   };
   visitItems(array(root.item), collection, []);
   return collection;
+}
+
+export function parsePostmanEnvironment(source: string): Environment {
+  let parsed: unknown;
+  try { parsed = JSON.parse(source); } catch { throw new Error('The selected file is not valid JSON.'); }
+  const root = object(parsed);
+  if (!Array.isArray(root.values)) {
+    throw new Error('This JSON file is not a Postman Environment file.');
+  }
+  const name = string(root.name, 'Imported Environment').trim() || 'Imported Environment';
+  const variables = array(root.values).map((entry) => {
+    const row = object(entry);
+    return { id: uid(), key: string(row.key), value: string(row.value), description: descriptionText(row.description), enabled: row.enabled !== false, secret: row.type === 'secret' };
+  }).filter((row) => row.key);
+  return { id: uid(), name, variables: rowsWithBlank(variables) };
 }
 
 function visitItems(items: unknown[], collection: Collection, parents: string[]) {

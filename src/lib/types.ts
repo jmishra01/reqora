@@ -4,6 +4,7 @@ export type KeyValue = {
   value: string;
   enabled: boolean;
   description?: string;
+  secret?: boolean;
 };
 
 export type FormDataRow = KeyValue & {

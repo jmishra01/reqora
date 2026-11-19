@@ -20,10 +20,13 @@
   export let onNewRequest: () => void;
   export let onNewCollection: () => void;
   export let onNewEnvironment: () => void;
+  export let onImportEnvironments: (files: FileList | null) => void;
   export let onDeleteHistory: () => void;
   export let onToggleCollection: (collection: Collection) => void;
   export let onToggleFolder: (collection: Collection, folder: CollectionFolder) => void;
   export let onSelectEnvironment: (environment: Environment) => void;
+  export let onExportEnvironment: (environment: Environment) => void;
+  export let onDeleteEnvironment: (environment: Environment) => void;
   export let onAddRequestToCollection: (collection: Collection) => void;
   export let onAddFolder: (collection: Collection) => void;
   export let onRenameCollection: (collection: Collection, name: string) => void;
@@ -45,6 +48,7 @@
   let renamingId = '';
   let renameValue = '';
   let collectionFileInput: HTMLInputElement;
+  let environmentFileInput: HTMLInputElement;
   $: query = search.trim().toLowerCase();
 
   function startRename(collection: Collection) {
@@ -133,8 +137,10 @@
   <div class="sidebar-heading">
     <strong>{activeSection}</strong>
     <div>
-      {#if activeSection === 'history' && workspace.history.length}
-        <button class="icon-button" on:click={onDeleteHistory} title="Clear history"><Trash2 size={14} /></button>
+      {#if activeSection === 'history'}
+        {#if workspace.history.length}
+          <button class="icon-button" on:click={onDeleteHistory} title="Clear history"><Trash2 size={14} /></button>
+        {/if}
       {:else if activeSection === 'collections'}
         <input class="hidden-file-input" bind:this={collectionFileInput} type="file" accept="application/json,.json,.postman_collection" multiple on:change={(event) => { onImportCollections(event.currentTarget.files); event.currentTarget.value = ''; }} />
         <button class="icon-button" on:click={() => collectionFileInput.click()} title="Import collection JSON" aria-label="Import collection JSON"><FileUp size={15} /></button>
@@ -142,6 +148,8 @@
         <button class="icon-button" on:click={onNewCollection} title="New collection"><FolderPlus size={15} /></button>
         <button class="icon-button" on:click={() => onNewRequest()} title="New request"><Plus size={15} /></button>
       {:else}
+        <input class="hidden-file-input" bind:this={environmentFileInput} type="file" accept="application/json,.json,.postman_environment" multiple on:change={(event) => { onImportEnvironments(event.currentTarget.files); event.currentTarget.value = ''; }} />
+        <button class="icon-button" on:click={() => environmentFileInput.click()} title="Import environment JSON" aria-label="Import environment JSON"><FileUp size={15} /></button>
         <button class="icon-button" on:click={onNewEnvironment} title="New environment"><Plus size={15} /></button>
       {/if}
     </div>
@@ -263,14 +271,18 @@
       {/if}
     {:else}
       {#each workspace.environments.filter(e => !query || e.name.toLowerCase().includes(query)) as environment (environment.id)}
-        <button class="environment-row" on:click={() => onSelectEnvironment(environment)}>
-          <div class="environment-icon"><Globe2 size={15} /></div>
-          <span><strong>{environment.name}</strong><small>{environment.variables.filter(v => v.key).length} variables</small></span>
+        <div class="environment-row">
+          <button class="environment-row-main" on:click={() => onSelectEnvironment(environment)}>
+            <div class="environment-icon"><Globe2 size={15} /></div>
+            <span><strong>{environment.name}</strong><small>{environment.variables.filter(v => v.key).length} variables</small></span>
+          </button>
+          <button class="icon-button" on:click={() => onExportEnvironment(environment)} title="Export environment JSON" aria-label={`Export ${environment.name}`}><Download size={14} /></button>
+          <button class="icon-button" on:click={() => onDeleteEnvironment(environment)} title="Delete environment" aria-label={`Delete ${environment.name}`}><Trash2 size={14} /></button>
           <ChevronRight size={14} />
-        </button>
+        </div>
       {/each}
       {#if !workspace.environments.length}
-        <div class="sidebar-empty"><Globe2 size={24} /><p>No environments yet</p><button on:click={onNewEnvironment}>Create environment</button></div>
+        <div class="sidebar-empty"><Globe2 size={24} /><p>No environments yet</p><button on:click={onNewEnvironment}>Create environment</button><button on:click={() => environmentFileInput.click()}>Import JSON</button></div>
       {/if}
     {/if}
   </div>

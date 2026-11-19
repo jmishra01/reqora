@@ -189,7 +189,7 @@ export function parsePostmanCollection(source: string): Collection {
   return collection;
 }
 
-export function parsePostmanEnvironment(source: string): Environment {
+export function parsePostmanEnvironment(source: string): { environment: Environment; warning?: string } {
   let parsed: unknown;
   try { parsed = JSON.parse(source); } catch { throw new Error('The selected file is not valid JSON.'); }
   const root = object(parsed);
@@ -201,7 +201,11 @@ export function parsePostmanEnvironment(source: string): Environment {
     const row = object(entry);
     return { id: uid(), key: string(row.key), value: string(row.value), description: descriptionText(row.description), enabled: row.enabled !== false, secret: row.type === 'secret' };
   }).filter((row) => row.key);
-  return { id: uid(), name, variables: rowsWithBlank(variables) };
+  const environment = { id: uid(), name, variables: rowsWithBlank(variables) };
+  const warning = root._postman_variable_scope === 'globals'
+    ? `"${name}" looks like a Postman Globals export, not an Environment — imported as a regular environment.`
+    : undefined;
+  return { environment, warning };
 }
 
 function visitItems(items: unknown[], collection: Collection, parents: string[]) {

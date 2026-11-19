@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import {
     Activity, AlertTriangle, Braces, Check, Cloud, CodeXml as Code2, Command, Download, Eye, FileUp,
-    Earth as Globe2, Github, CircleQuestionMark as HelpCircle, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Settings2,
+    Earth as Globe2, Github, CircleQuestionMark as HelpCircle, Layers3, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Search, Settings2,
     Sparkles, Sun, X, Route, Trash2, ChevronUp, ChevronDown
   } from '@lucide/svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -61,7 +61,7 @@
   let requestError = '';
   let executing = false;
   let preRequestConsole: ScriptConsoleEntry[] = [];
-  let saved = true;
+  let unsavedTabs: Record<string, boolean> = {};
   let sidebarVisible = true;
   type AppTheme = 'dark' | 'light' | 'midnight' | 'forest' | 'ocean';
   let theme: AppTheme = 'dark';
@@ -85,6 +85,11 @@
   let moveTarget = '';
   let codeCopied = false;
   let codeLanguage: CodeLanguage = 'curl';
+  let commandQuery = '';
+  let justImportedEnvironmentIds: string[] = [];
+  let justImportedTimer: number | undefined;
+  let oauthFetching = false;
+  let oauthTokenError = '';
   let toast = '';
   let toastTimer: number | undefined;
   let processMetrics: ProcessMetrics | null = null;
@@ -180,6 +185,16 @@
     ...collection.requests.map((request) => ({ request, label: `${collection.name} / ${request.name}` })),
     ...collection.folders.flatMap((folder) => folder.requests.map((request) => ({ request, label: `${collection.name} / ${folder.name} / ${request.name}` })))
   ]);
+  $: commandActions = [
+    { id: 'request' as const, label: 'New request', detail: 'Create an unsaved HTTP request', shortcut: '⌘ N' },
+    { id: 'collection' as const, label: 'New collection', detail: 'Add a local collection', shortcut: '' },
+    { id: 'environments' as const, label: 'Environments', detail: 'Manage variables and secrets', shortcut: '' },
+    { id: 'settings' as const, label: 'Settings', detail: 'Theme and local workspace options', shortcut: '' }
+  ].filter((action) => matchesQuery(action.label, commandQuery) || matchesQuery(action.detail, commandQuery));
+  $: commandRequestMatches = commandQuery.trim() ? savedRequests.filter((item) => matchesQuery(item.label, commandQuery)).slice(0, 8) : [];
+  $: commandCollectionMatches = commandQuery.trim() ? workspace.collections.filter((collection) => matchesQuery(collection.name, commandQuery)).slice(0, 5) : [];
+  $: commandEnvironmentMatches = commandQuery.trim() ? workspace.environments.filter((environment) => matchesQuery(environment.name, commandQuery)).slice(0, 5) : [];
+  $: commandHasMatches = Boolean(commandActions.length || commandRequestMatches.length || commandCollectionMatches.length || commandEnvironmentMatches.length);
 
   onMount(async () => {
     const savedTheme = localStorage.getItem('postcall.theme');
@@ -217,7 +232,7 @@
 
   function markChanged() {
     openRequests = [...openRequests];
-    saved = false;
+    if (activeRequestId) unsavedTabs = { ...unsavedTabs, [activeRequestId]: true };
   }
 
   function commitWorkspace() {
@@ -239,7 +254,7 @@
     const first = savedRequest ?? blankRequest();
     openRequests = [structuredClone(normalizeRequest(first))];
     activeRequestId = first.id;
-    saved = Boolean(savedRequest);
+    unsavedTabs = savedRequest ? {} : { [first.id]: true };
     response = null;
     requestError = '';
     requestTab = 'params';
@@ -363,12 +378,14 @@
     const existingNames = new Set(workspace.environments.map((item) => item.name));
     const environments: Environment[] = [];
     const failures: string[] = [];
+    const warnings: string[] = [];
     for (const file of fileArray) {
       try {
-        const environment = parsePostmanEnvironment(await file.text());
+        const { environment, warning } = parsePostmanEnvironment(await file.text());
         environment.name = uniqueEnvironmentName(environment.name, existingNames);
         existingNames.add(environment.name);
         environments.push(environment);
+        if (warning) warnings.push(warning);
       } catch (error) {
         failures.push(`${file.name}: ${error instanceof Error ? error.message : 'import failed'}`);
       }
@@ -377,9 +394,13 @@
       workspace.environments.push(...environments);
       activeSection = 'environments';
       commitWorkspace();
+      justImportedEnvironmentIds = environments.map((environment) => environment.id);
+      window.clearTimeout(justImportedTimer);
+      justImportedTimer = window.setTimeout(() => justImportedEnvironmentIds = [], 4000);
     }
     const summary = `${environments.length} of ${fileArray.length} environment${fileArray.length === 1 ? '' : 's'} imported`;
-    showToast(failures.length ? `${summary} — ${failures.join('; ')}` : `${environments.length} environment${environments.length === 1 ? '' : 's'} imported`);
+    const notes = [...failures, ...warnings];
+    showToast(notes.length ? `${summary} — ${notes.join('; ')}` : `${environments.length} environment${environments.length === 1 ? '' : 's'} imported`);
   }
 
   function openCurlImport() {
@@ -393,7 +414,7 @@
       const request = parseCurlCommand(curlText);
       openRequests = [...openRequests, request];
       activeRequestId = request.id;
-      saved = false;
+      unsavedTabs = { ...unsavedTabs, [request.id]: true };
       response = null;
       requestError = '';
       preRequestConsole = [];
@@ -410,9 +431,8 @@
     activeRequestId = request.id;
     if (collection) {
       collection.requests.push(structuredClone(request));
-      saved = true;
       commitWorkspace();
-    } else saved = false;
+    } else unsavedTabs = { ...unsavedTabs, [request.id]: true };
     response = null;
     requestError = '';
     preRequestConsole = [];
@@ -422,6 +442,10 @@
     event.stopPropagation();
     const index = openRequests.findIndex((request) => request.id === id);
     openRequests = openRequests.filter((request) => request.id !== id);
+    if (unsavedTabs[id]) {
+      const { [id]: _removed, ...rest } = unsavedTabs;
+      unsavedTabs = rest;
+    }
     if (activeRequestId === id) {
       activeRequestId = openRequests[Math.max(0, index - 1)]?.id ?? '';
       response = null;
@@ -447,7 +471,10 @@
         if (folder) folder.requests[folder.requests.findIndex((request) => request.id === activeRequest.id)] = structuredClone(activeRequest);
       }
     }
-    saved = true;
+    if (unsavedTabs[activeRequest.id]) {
+      const { [activeRequest.id]: _saved, ...rest } = unsavedTabs;
+      unsavedTabs = rest;
+    }
     commitWorkspace();
     showToast('Request saved');
   }
@@ -614,6 +641,7 @@
   }
 
   function exportCollection(collection: Collection) {
+    const toVariableList = (rows: KeyValue[]) => rows.filter((row) => row.key).map(({ key, value, description, enabled }) => ({ key, value, description, disabled: !enabled, type: 'string' }));
     const toAuth = (auth: RequestAuth) => {
       const entry = (key: string, value = '') => ({ key, value, type: 'string' });
       if (auth.type === 'inherit') return undefined;
@@ -668,16 +696,16 @@
     const output = {
       info: { name: collection.name, description: collection.description, schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
       auth: toAuth(collection.auth),
-      variable: collection.variables.filter((row) => row.key).map(({ key, value, description, enabled }) => ({ key, value, description, disabled: !enabled, type: 'string' })),
+      variable: toVariableList(collection.variables),
       item: [
         ...collection.requests.map(toItem),
-        ...collection.folders.map((folder) => ({ name: folder.name, auth: toAuth(folder.auth), item: folder.requests.map(toItem) }))
+        ...collection.folders.map((folder) => ({ name: folder.name, auth: toAuth(folder.auth), variable: toVariableList(folder.variables), item: folder.requests.map(toItem) }))
       ]
     };
     const href = URL.createObjectURL(new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = href;
-    anchor.download = `${collection.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'collection'}.postman_collection.json`;
+    anchor.download = `${sanitizeFilename(collection.name, 'collection')}.postman_collection.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -736,7 +764,7 @@
     const href = URL.createObjectURL(new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = href;
-    anchor.download = `${environment.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'environment'}.postman_environment.json`;
+    anchor.download = `${sanitizeFilename(environment.name, 'environment')}.postman_environment.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -757,6 +785,11 @@
     pendingDeleteEnvironment = null;
     commitWorkspace();
     showToast('Environment deleted');
+  }
+
+  function sanitizeFilename(name: string, fallback: string): string {
+    const slug = name.replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '');
+    return slug || `${fallback}-${uid().slice(0, 8)}`;
   }
 
   function requestScope(request: ApiRequest) {
@@ -790,6 +823,53 @@
       output = next;
     }
     return output;
+  }
+
+  async function fetchOAuthToken(auth: RequestAuth, onToken?: () => void) {
+    if (!auth.oauthTokenUrl?.trim()) {
+      oauthTokenError = 'Set a token URL first.';
+      return;
+    }
+    oauthFetching = true;
+    oauthTokenError = '';
+    try {
+      const tokenUrl = activeRequest ? resolveVariables(auth.oauthTokenUrl, activeRequest) : auth.oauthTokenUrl;
+      const params = new URLSearchParams();
+      params.set('grant_type', auth.oauthGrantType ?? 'client_credentials');
+      if (auth.oauthGrantType === 'password') {
+        params.set('username', auth.oauthUsername ?? '');
+        params.set('password', auth.oauthPassword ?? '');
+      }
+      if (auth.oauthScope?.trim()) params.set('scope', auth.oauthScope.trim());
+      const headers: Array<[string, string]> = [['Content-Type', 'application/x-www-form-urlencoded']];
+      if (auth.oauthClientAuthHeader && auth.oauthClientId) {
+        headers.push(['Authorization', `Basic ${btoa(`${auth.oauthClientId}:${auth.oauthClientSecret ?? ''}`)}`]);
+      } else {
+        if (auth.oauthClientId) params.set('client_id', auth.oauthClientId);
+        if (auth.oauthClientSecret) params.set('client_secret', auth.oauthClientSecret);
+      }
+      const result = await executeRequest({
+        method: 'POST',
+        url: tokenUrl,
+        headers,
+        body: params.toString(),
+        timeoutMs: 15000,
+        followRedirects: true,
+        validateCertificates: true
+      });
+      let json: Record<string, unknown>;
+      try { json = JSON.parse(result.body); } catch { throw new Error('The token endpoint did not return JSON.'); }
+      if (result.status >= 400 || !json.access_token) {
+        throw new Error(String(json.error_description ?? json.error ?? `Token request failed with HTTP ${result.status}.`));
+      }
+      auth.token = String(json.access_token);
+      onToken?.();
+      showToast('Access token retrieved');
+    } catch (error) {
+      oauthTokenError = error instanceof Error ? error.message : 'Could not retrieve an access token.';
+    } finally {
+      oauthFetching = false;
+    }
   }
 
   async function prepareRequestForSend(request: ApiRequest, runtimeVariables: Record<string, string> = {}) {
@@ -951,6 +1031,23 @@
     }
   }
 
+  function truncateResponseForHistory(data: ResponseData): ResponseData {
+    const MAX_BODY_CHARS = 300_000;
+    if (data.body.length <= MAX_BODY_CHARS) return data;
+    return { ...data, body: `${data.body.slice(0, MAX_BODY_CHARS)}\n\n[Truncated for history — resend the request to see the full body.]` };
+  }
+
+  function openHistoryEntry(entry: HistoryEntry) {
+    openRequest(entry.request);
+    response = entry.response ?? null;
+    requestError = entry.requestError ?? '';
+  }
+
+  function deleteHistoryEntry(entry: HistoryEntry) {
+    workspace.history = workspace.history.filter((item) => item.id !== entry.id);
+    commitWorkspace();
+  }
+
   async function sendRequest() {
     if (!activeRequest || executing) return;
     requestError = '';
@@ -966,11 +1063,12 @@
         request: structuredClone(activeRequest),
         status: response.status,
         elapsedMs: response.elapsedMs,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        response: truncateResponseForHistory(response)
       };
     } catch (error) {
       requestError = error instanceof Error ? error.message : String(error);
-      historyEntry = { id: uid(), request: structuredClone(activeRequest), createdAt: new Date().toISOString() };
+      historyEntry = { id: uid(), request: structuredClone(activeRequest), createdAt: new Date().toISOString(), requestError };
     } finally {
       executing = false;
       if (historyEntry) {
@@ -1198,12 +1296,12 @@
           error: succeeded ? undefined : `HTTP ${stepResponse.status} ${stepResponse.statusText}`,
           extracted
         });
-        historyEntries.push({ id: uid(), request: structuredClone(request), status: stepResponse.status, elapsedMs: stepResponse.elapsedMs, createdAt: new Date().toISOString() });
+        historyEntries.push({ id: uid(), request: structuredClone(request), status: stepResponse.status, elapsedMs: stepResponse.elapsedMs, createdAt: new Date().toISOString(), response: truncateResponseForHistory(stepResponse) });
         if (!succeeded && journeyEditor.stopOnError) stopped = true;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         updateJourneyResult(step.id, { state: 'failed', error: message });
-        historyEntries.push({ id: uid(), request: structuredClone(request), createdAt: new Date().toISOString() });
+        historyEntries.push({ id: uid(), request: structuredClone(request), createdAt: new Date().toISOString(), requestError: message });
         if (journeyEditor.stopOnError) stopped = true;
       }
     }
@@ -1477,7 +1575,44 @@
     if (action === 'settings') utilityModal = 'settings';
   }
 
+  function matchesQuery(text: string, query: string) {
+    return !query.trim() || text.toLowerCase().includes(query.trim().toLowerCase());
+  }
+
+  function openCommandPalette() {
+    commandQuery = '';
+    utilityModal = 'command';
+  }
+
+  function runCommandOpenRequest(request: ApiRequest) {
+    utilityModal = null;
+    openRequest(request);
+  }
+
+  function runCommandOpenCollection(collection: Collection) {
+    utilityModal = null;
+    activeSection = 'collections';
+    collection.expanded = true;
+    commitWorkspace();
+  }
+
+  function runCommandOpenEnvironment(environment: Environment) {
+    utilityModal = null;
+    activeSection = 'environments';
+    editEnvironment(environment);
+  }
+
+  function autofocusAction(node: HTMLElement) {
+    node.focus();
+    return {};
+  }
+
   function handleKeydown(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openCommandPalette();
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
       sendRequest();
@@ -1507,7 +1642,7 @@
     <div class="top-actions">
       <div class="sync-state"><Cloud size={15} /><span>Saved locally</span></div>
       <div class="divider"></div>
-      <button class="icon-button" on:click={() => utilityModal = 'command'} title="Command palette"><Command size={16} /></button>
+      <button class="icon-button" on:click={openCommandPalette} title="Command palette (⌘K)"><Command size={16} /></button>
       <button class="icon-button" on:click={() => selectTheme(theme === 'light' ? 'dark' : 'light')} title="Toggle light and dark theme">{#if theme === 'light'}<Moon size={16} />{:else}<Sun size={16} />{/if}</button>
       <button class="icon-button" on:click={() => utilityModal = 'help'} title="Help"><HelpCircle size={16} /></button>
       <!-- <div class="avatar" title="Local profile">LocalUser</div> -->
@@ -1529,6 +1664,8 @@
         selectedRequestId={activeRequestId}
         onSection={(section) => activeSection = section}
         onOpenRequest={openRequest}
+        onOpenHistoryEntry={openHistoryEntry}
+        onDeleteHistoryEntry={deleteHistoryEntry}
         onNewRequest={() => newRequest()}
         onNewCollection={newCollection}
         onNewEnvironment={newEnvironment}
@@ -1539,6 +1676,7 @@
         onSelectEnvironment={editEnvironment}
         onExportEnvironment={exportEnvironment}
         onDeleteEnvironment={deleteEnvironment}
+        justImportedEnvironmentIds={justImportedEnvironmentIds}
         onAddRequestToCollection={(collection) => newRequest(collection)}
         onAddFolder={addFolder}
         onRenameCollection={renameCollection}
@@ -1562,7 +1700,7 @@
             <button class="request-tab" class:active={request.id === activeRequestId} on:click={() => { activeRequestId = request.id; response = null; requestError = ''; preRequestConsole = []; }}>
               <span class="method mini {request.method.toLowerCase()}">{request.method.slice(0, 3)}</span>
               <span>{request.name}</span>
-              {#if request.id === activeRequestId && !saved}<i></i>{/if}
+              {#if unsavedTabs[request.id]}<i></i>{/if}
               <span
                 class="close-tab"
                 role="button"
@@ -1581,7 +1719,7 @@
           <div class="request-title-row">
             <div class="request-title">
               <input bind:value={activeRequest.name} on:input={markChanged} aria-label="Request name" />
-              <span class="unsaved-state">{saved ? 'Saved' : 'Unsaved changes'}</span>
+              <span class="unsaved-state">{unsavedTabs[activeRequestId] ? 'Unsaved changes' : 'Saved'}</span>
             </div>
             <div class="request-actions">
               <button class="secondary-button" on:click={openJourneys} disabled={!savedRequests.length}><Route size={15} /> Journeys</button>
@@ -1647,15 +1785,33 @@
                   <div class="auth-fields">
                     {#if activeRequest.auth.type === 'none' || activeRequest.auth.type === 'inherit'}
                       <div class="auth-empty"><div><Check size={18} /></div><strong>{activeRequest.auth.type === 'inherit' ? (effectiveAuth(activeRequest).type === 'none' ? 'No inherited authorization configured' : `${effectiveAuth(activeRequest).type} authorization inherited`) : 'This request does not use authentication'}</strong><p>{activeRequest.auth.type === 'inherit' ? 'Authorization resolves from the containing folder first, then the collection.' : 'Select an authentication type from the left when the API requires credentials.'}</p></div>
-                    {:else if activeRequest.auth.type === 'bearer' || activeRequest.auth.type === 'jwt-bearer' || activeRequest.auth.type === 'oauth2'}
-                      <label>{activeRequest.auth.type === 'oauth2' ? 'Access token' : 'Token'}<input type="password" bind:value={activeRequest.auth.token} on:input={markChanged} placeholder={activeRequest.auth.type === 'oauth2' ? 'OAuth access token' : 'Enter token'} /></label>
+                    {:else if activeRequest.auth.type === 'bearer' || activeRequest.auth.type === 'jwt-bearer'}
+                      <label>Token<input bind:value={activeRequest.auth.token} on:input={markChanged} placeholder={'Enter token or {{variable}}'} /></label>
+                      <label>Header prefix<input bind:value={activeRequest.auth.prefix} on:input={markChanged} placeholder="Bearer" /></label>
+                    {:else if activeRequest.auth.type === 'oauth2'}
+                      <label>Grant type<select bind:value={activeRequest.auth.oauthGrantType} on:change={markChanged}><option value="client_credentials">Client Credentials</option><option value="password">Username &amp; Password</option></select></label>
+                      <label>Token URL<input bind:value={activeRequest.auth.oauthTokenUrl} on:input={markChanged} placeholder="https://auth.example.com/oauth/token" /></label>
+                      <label>Client ID<input bind:value={activeRequest.auth.oauthClientId} on:input={markChanged} placeholder="Client ID" /></label>
+                      <label>Client Secret<input type="password" bind:value={activeRequest.auth.oauthClientSecret} on:input={markChanged} placeholder="Client secret" /></label>
+                      <label>Scope<input bind:value={activeRequest.auth.oauthScope} on:input={markChanged} placeholder="read write" /></label>
+                      {#if activeRequest.auth.oauthGrantType === 'password'}
+                        <label>Username<input bind:value={activeRequest.auth.oauthUsername} on:input={markChanged} placeholder="Username" /></label>
+                        <label>Password<input type="password" bind:value={activeRequest.auth.oauthPassword} on:input={markChanged} placeholder="Password" /></label>
+                      {/if}
+                      <label class="oauth-checkbox"><input type="checkbox" bind:checked={activeRequest.auth.oauthClientAuthHeader} on:change={markChanged} /><span>Send client credentials as a Basic Auth header</span></label>
+                      <div class="oauth-token-row">
+                        <button class="secondary-button" type="button" disabled={oauthFetching} on:click={() => fetchOAuthToken(activeRequest.auth, markChanged)}>{oauthFetching ? 'Requesting token…' : 'Get New Access Token'}</button>
+                        {#if activeRequest.auth.token}<span class="oauth-token-preview">Current token ends in …{activeRequest.auth.token.slice(-6)}</span>{/if}
+                      </div>
+                      {#if oauthTokenError}<p class="oauth-token-error">{oauthTokenError}</p>{/if}
+                      <label>Access token<input bind:value={activeRequest.auth.token} on:input={markChanged} placeholder="Retrieved automatically, or paste one" /></label>
                       <label>Header prefix<input bind:value={activeRequest.auth.prefix} on:input={markChanged} placeholder="Bearer" /></label>
                     {:else if activeRequest.auth.type === 'basic'}
                       <label>Username<input bind:value={activeRequest.auth.username} on:input={markChanged} placeholder="Username" /></label>
-                      <label>Password<input type="password" bind:value={activeRequest.auth.password} on:input={markChanged} placeholder="Password" /></label>
+                      <label>Password<input bind:value={activeRequest.auth.password} on:input={markChanged} placeholder={'Password or {{variable}}'} /></label>
                     {:else}
                       <label>Key<input bind:value={activeRequest.auth.key} on:input={markChanged} placeholder="X-API-Key" /></label>
-                      <label>Value<input type="password" bind:value={activeRequest.auth.value} on:input={markChanged} placeholder="API key value" /></label>
+                      <label>Value<input bind:value={activeRequest.auth.value} on:input={markChanged} placeholder={'API key value or {{variable}}'} /></label>
                       <label>Add to<select bind:value={activeRequest.auth.placement} on:change={markChanged}><option value="header">Header</option><option value="query">Query params</option></select></label>
                     {/if}
                   </div>
@@ -2024,15 +2180,33 @@
               <div class="auth-fields">
                 {#if scopeSettings.auth.type === 'none' || scopeSettings.auth.type === 'inherit'}
                   <div class="auth-empty"><div><Check size={18} /></div><strong>{scopeSettings.auth.type === 'inherit' ? 'Authorization inherited from the collection' : 'No authorization configured at this level'}</strong><p>{scopeSettings.auth.type === 'inherit' ? 'Requests in this folder use collection authorization unless they define their own.' : 'Requests can still define their own authorization.'}</p></div>
-                {:else if scopeSettings.auth.type === 'bearer' || scopeSettings.auth.type === 'jwt-bearer' || scopeSettings.auth.type === 'oauth2'}
-                  <label>{scopeSettings.auth.type === 'oauth2' ? 'Access token' : 'Token'}<input type="password" bind:value={scopeSettings.auth.token} placeholder={'Enter token or {{variable}}'} /></label>
+                {:else if scopeSettings.auth.type === 'bearer' || scopeSettings.auth.type === 'jwt-bearer'}
+                  <label>Token<input bind:value={scopeSettings.auth.token} placeholder={'Enter token or {{variable}}'} /></label>
+                  <label>Header prefix<input bind:value={scopeSettings.auth.prefix} placeholder="Bearer" /></label>
+                {:else if scopeSettings.auth.type === 'oauth2'}
+                  <label>Grant type<select bind:value={scopeSettings.auth.oauthGrantType}><option value="client_credentials">Client Credentials</option><option value="password">Username &amp; Password</option></select></label>
+                  <label>Token URL<input bind:value={scopeSettings.auth.oauthTokenUrl} placeholder="https://auth.example.com/oauth/token" /></label>
+                  <label>Client ID<input bind:value={scopeSettings.auth.oauthClientId} placeholder="Client ID" /></label>
+                  <label>Client Secret<input type="password" bind:value={scopeSettings.auth.oauthClientSecret} placeholder="Client secret" /></label>
+                  <label>Scope<input bind:value={scopeSettings.auth.oauthScope} placeholder="read write" /></label>
+                  {#if scopeSettings.auth.oauthGrantType === 'password'}
+                    <label>Username<input bind:value={scopeSettings.auth.oauthUsername} placeholder="Username" /></label>
+                    <label>Password<input type="password" bind:value={scopeSettings.auth.oauthPassword} placeholder="Password" /></label>
+                  {/if}
+                  <label class="oauth-checkbox"><input type="checkbox" bind:checked={scopeSettings.auth.oauthClientAuthHeader} /><span>Send client credentials as a Basic Auth header</span></label>
+                  <div class="oauth-token-row">
+                    <button class="secondary-button" type="button" disabled={oauthFetching} on:click={() => fetchOAuthToken(scopeSettings!.auth)}>{oauthFetching ? 'Requesting token…' : 'Get New Access Token'}</button>
+                    {#if scopeSettings.auth.token}<span class="oauth-token-preview">Current token ends in …{scopeSettings.auth.token.slice(-6)}</span>{/if}
+                  </div>
+                  {#if oauthTokenError}<p class="oauth-token-error">{oauthTokenError}</p>{/if}
+                  <label>Access token<input bind:value={scopeSettings.auth.token} placeholder="Retrieved automatically, or paste one" /></label>
                   <label>Header prefix<input bind:value={scopeSettings.auth.prefix} placeholder="Bearer" /></label>
                 {:else if scopeSettings.auth.type === 'basic'}
                   <label>Username<input bind:value={scopeSettings.auth.username} placeholder={'Username or {{variable}}'} /></label>
-                  <label>Password<input type="password" bind:value={scopeSettings.auth.password} placeholder={'Password or {{variable}}'} /></label>
+                  <label>Password<input bind:value={scopeSettings.auth.password} placeholder={'Password or {{variable}}'} /></label>
                 {:else if scopeSettings.auth.type === 'api-key'}
                   <label>Key<input bind:value={scopeSettings.auth.key} placeholder="X-API-Key" /></label>
-                  <label>Value<input type="password" bind:value={scopeSettings.auth.value} placeholder={'Value or {{variable}}'} /></label>
+                  <label>Value<input bind:value={scopeSettings.auth.value} placeholder={'Value or {{variable}}'} /></label>
                   <label>Add to<select bind:value={scopeSettings.auth.placement}><option value="header">Header</option><option value="query">Query params</option></select></label>
                 {/if}
               </div>
@@ -2153,10 +2327,54 @@
           <div class="modal-footer"><button class="primary-button" on:click={() => utilityModal = null}>Done</button></div>
         {:else if utilityModal === 'command'}
           <div class="command-list">
-            <button on:click={() => runCommand('request')}><Plus size={16} /><span><strong>New request</strong><small>Create an unsaved HTTP request</small></span><kbd>⌘ N</kbd></button>
-            <button on:click={() => runCommand('collection')}><Plus size={16} /><span><strong>New collection</strong><small>Add a local collection</small></span></button>
-            <button on:click={() => runCommand('environments')}><Globe2 size={16} /><span><strong>Environments</strong><small>Manage variables and secrets</small></span></button>
-            <button on:click={() => runCommand('settings')}><Command size={16} /><span><strong>Settings</strong><small>Theme and local workspace options</small></span></button>
+            <div class="command-search">
+              <Search size={14} />
+              <input
+                placeholder="Search actions, requests, collections, environments…"
+                bind:value={commandQuery}
+                use:autofocusAction
+                on:keydown={(event) => event.stopPropagation()}
+                aria-label="Search the command palette"
+              />
+            </div>
+            {#if commandActions.length}
+              <div class="command-group-label">Actions</div>
+              {#each commandActions as action (action.id)}
+                <button on:click={() => runCommand(action.id)}>
+                  {#if action.id === 'environments'}<Globe2 size={16} />{:else if action.id === 'settings'}<Command size={16} />{:else}<Plus size={16} />{/if}
+                  <span><strong>{action.label}</strong><small>{action.detail}</small></span>
+                  {#if action.shortcut}<kbd>{action.shortcut}</kbd>{/if}
+                </button>
+              {/each}
+            {/if}
+            {#if commandRequestMatches.length}
+              <div class="command-group-label">Requests</div>
+              {#each commandRequestMatches as match (match.request.id)}
+                <button on:click={() => runCommandOpenRequest(match.request)}>
+                  <span class="method mini {match.request.method.toLowerCase()}">{match.request.method.slice(0, 3)}</span>
+                  <span><strong>{match.request.name}</strong><small>{match.label}</small></span>
+                </button>
+              {/each}
+            {/if}
+            {#if commandCollectionMatches.length}
+              <div class="command-group-label">Collections</div>
+              {#each commandCollectionMatches as collection (collection.id)}
+                <button on:click={() => runCommandOpenCollection(collection)}>
+                  <Layers3 size={16} />
+                  <span><strong>{collection.name}</strong><small>{collection.requests.length + collection.folders.reduce((total, folder) => total + folder.requests.length, 0)} requests</small></span>
+                </button>
+              {/each}
+            {/if}
+            {#if commandEnvironmentMatches.length}
+              <div class="command-group-label">Environments</div>
+              {#each commandEnvironmentMatches as environment (environment.id)}
+                <button on:click={() => runCommandOpenEnvironment(environment)}>
+                  <Globe2 size={16} />
+                  <span><strong>{environment.name}</strong><small>{environment.variables.filter((row) => row.key).length} variables</small></span>
+                </button>
+              {/each}
+            {/if}
+            {#if !commandHasMatches}<p class="command-empty">No matches for “{commandQuery}”.</p>{/if}
           </div>
         {:else if utilityModal === 'settings'}
           <div class="application-settings">

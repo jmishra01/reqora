@@ -1,6 +1,6 @@
 import type { RequestInput } from './types';
 
-export type CodeLanguage = 'curl' | 'javascript' | 'python' | 'go' | 'rust' | 'csharp' | 'php';
+export type CodeLanguage = 'curl' | 'javascript' | 'python' | 'go' | 'rust' | 'csharp' | 'php' | 'java' | 'ruby';
 
 export const codeLanguageOptions: Array<{ id: CodeLanguage; label: string; detail: string }> = [
   { id: 'curl', label: 'cURL', detail: 'Command line' },
@@ -9,7 +9,9 @@ export const codeLanguageOptions: Array<{ id: CodeLanguage; label: string; detai
   { id: 'go', label: 'Go', detail: 'net/http' },
   { id: 'rust', label: 'Rust', detail: 'reqwest' },
   { id: 'csharp', label: 'C#', detail: 'HttpClient' },
-  { id: 'php', label: 'PHP', detail: 'cURL' }
+  { id: 'php', label: 'PHP', detail: 'cURL' },
+  { id: 'java', label: 'Java', detail: 'HttpClient' },
+  { id: 'ruby', label: 'Ruby', detail: 'Net::HTTP' }
 ];
 
 const jsString = (value: string) => JSON.stringify(value);
@@ -215,6 +217,114 @@ function generatePhp(input: RequestInput) {
   return lines.join('\n');
 }
 
+const javaString = (value: string) => JSON.stringify(value);
+const rubyString = (value: string) => `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+
+function generateJava(input: RequestInput) {
+  const lines = [
+    'import java.net.URI;',
+    'import java.net.http.HttpClient;',
+    'import java.net.http.HttpRequest;',
+    'import java.net.http.HttpRequest.BodyPublisher;',
+    'import java.net.http.HttpRequest.BodyPublishers;',
+    'import java.net.http.HttpResponse;',
+    'import java.time.Duration;',
+    ''
+  ];
+  const needsFile = Boolean(input.binary || input.multipart?.some((field) => field.kind === 'file'));
+  if (needsFile) lines.splice(7, 0, 'import java.nio.file.Path;');
+  lines.push(
+    'public class Main {',
+    '    public static void main(String[] args) throws Exception {',
+    '        HttpClient client = HttpClient.newBuilder()',
+    `            .followRedirects(HttpClient.Redirect.${input.followRedirects ? 'NORMAL' : 'NEVER'})`,
+    `            .connectTimeout(Duration.ofMillis(${input.timeoutMs}))`,
+    '            .build();',
+    ''
+  );
+  if (!input.validateCertificates) lines.push('        // java.net.http.HttpClient has no built-in way to disable certificate validation;', '        // supply a custom SSLContext/SSLParameters if you need to test against a self-signed host.', '');
+
+  let bodyExpression = 'BodyPublishers.noBody()';
+  const extraHeaders: Array<[string, string]> = [];
+  if (input.multipart?.length) {
+    lines.push('        String boundary = "PostcallBoundary" + System.currentTimeMillis();', '        java.io.ByteArrayOutputStream multipartBody = new java.io.ByteArrayOutputStream();');
+    input.multipart.forEach((field) => {
+      if (field.kind === 'file') {
+        const fileName = field.fileName ?? 'upload.bin';
+        lines.push(
+          `        multipartBody.write(("--" + boundary + "\\r\\nContent-Disposition: form-data; name=${javaString(field.name)}; filename=${javaString(fileName)}\\r\\n\\r\\n").getBytes());`,
+          `        multipartBody.write(java.nio.file.Files.readAllBytes(Path.of(${javaString(fileName)})));`,
+          '        multipartBody.write("\\r\\n".getBytes());'
+        );
+      } else {
+        lines.push(`        multipartBody.write(("--" + boundary + "\\r\\nContent-Disposition: form-data; name=${javaString(field.name)}\\r\\n\\r\\n" + ${javaString(field.value)} + "\\r\\n").getBytes());`);
+      }
+    });
+    lines.push('        multipartBody.write(("--" + boundary + "--\\r\\n").getBytes());', '');
+    bodyExpression = 'BodyPublishers.ofByteArray(multipartBody.toByteArray())';
+    extraHeaders.push(['Content-Type', 'multipart/form-data; boundary=" + boundary + "']);
+  } else if (input.binary) {
+    bodyExpression = `BodyPublishers.ofFile(Path.of(${javaString(input.binary.fileName)}))`;
+  } else if (input.body !== undefined) {
+    bodyExpression = `BodyPublishers.ofString(${javaString(input.body)})`;
+  }
+
+  lines.push(
+    '        HttpRequest.Builder builder = HttpRequest.newBuilder()',
+    `            .uri(URI.create(${javaString(input.url)}))`,
+    `            .timeout(Duration.ofMillis(${input.timeoutMs}))`,
+    `            .method(${javaString(input.method)}, ${bodyExpression});`,
+    ''
+  );
+  input.headers.forEach(([key, value]) => lines.push(`        builder.header(${javaString(key)}, ${javaString(value)});`));
+  extraHeaders.forEach(([key, value]) => lines.push(`        builder.header(${javaString(key)}, "${value}");`));
+  lines.push(
+    '',
+    '        HttpRequest request = builder.build();',
+    '        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());',
+    '',
+    '        System.out.println(response.statusCode());',
+    '        System.out.println(response.body());',
+    '    }',
+    '}'
+  );
+  return lines.join('\n');
+}
+
+function generateRuby(input: RequestInput) {
+  const lines = ["require 'net/http'", "require 'uri'"];
+  if (input.multipart?.length) lines.push("require 'securerandom'");
+  lines.push('', `uri = URI(${rubyString(input.url)})`, 'http = Net::HTTP.new(uri.host, uri.port)', "http.use_ssl = uri.scheme == 'https'", `http.open_timeout = ${(input.timeoutMs / 1000).toFixed(3)}`, `http.read_timeout = ${(input.timeoutMs / 1000).toFixed(3)}`);
+  if (!input.validateCertificates) lines.push('http.verify_mode = OpenSSL::SSL::VERIFY_NONE # Use only for local testing.');
+  lines.push('');
+
+  const methodClass: Record<string, string> = { GET: 'Get', POST: 'Post', PUT: 'Put', PATCH: 'Patch', DELETE: 'Delete', HEAD: 'Head', OPTIONS: 'Options' };
+  const klass = methodClass[input.method.toUpperCase()] ?? 'Get';
+  lines.push(`request = Net::HTTP::${klass}.new(uri)`);
+  input.headers.forEach(([key, value]) => lines.push(`request[${rubyString(key)}] = ${rubyString(value)}`));
+
+  if (input.multipart?.length) {
+    lines.push('', "boundary = SecureRandom.hex(16)", `request['Content-Type'] = "multipart/form-data; boundary=#{boundary}"`, 'parts = []');
+    input.multipart.forEach((field) => {
+      if (field.kind === 'file') {
+        const fileName = field.fileName ?? 'upload.bin';
+        lines.push(`parts << "--#{boundary}\\r\\nContent-Disposition: form-data; name=${rubyString(field.name).slice(1, -1)}; filename=${rubyString(fileName).slice(1, -1)}\\r\\n\\r\\n" + File.read(${rubyString(fileName)}) + "\\r\\n"`);
+      } else {
+        lines.push(`parts << "--#{boundary}\\r\\nContent-Disposition: form-data; name=${rubyString(field.name).slice(1, -1)}\\r\\n\\r\\n" + ${rubyString(field.value)} + "\\r\\n"`);
+      }
+    });
+    lines.push('parts << "--#{boundary}--\\r\\n"', 'request.body = parts.join');
+  } else if (input.binary) {
+    lines.push('', `request.body = File.read(${rubyString(input.binary.fileName)})`);
+  } else if (input.body !== undefined) {
+    lines.push('', `request.body = ${rubyString(input.body)}`);
+  }
+  if (!input.followRedirects) lines.push('', '# Net::HTTP does not follow redirects automatically, so none are followed here.');
+
+  lines.push('', 'response = http.request(request)', 'puts response.code', 'puts response.body');
+  return lines.join('\n');
+}
+
 export function generateRequestCode(language: CodeLanguage, input: RequestInput) {
   if (language === 'javascript') return generateJavaScript(input);
   if (language === 'python') return generatePython(input);
@@ -222,5 +332,7 @@ export function generateRequestCode(language: CodeLanguage, input: RequestInput)
   if (language === 'rust') return generateRust(input);
   if (language === 'csharp') return generateCSharp(input);
   if (language === 'php') return generatePhp(input);
+  if (language === 'java') return generateJava(input);
+  if (language === 'ruby') return generateRuby(input);
   return generateCurl(input);
 }

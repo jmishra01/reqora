@@ -1,9 +1,9 @@
 <script lang="ts">
   import {
     ArrowDownAZ, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Download, Ellipsis, FilePlus2, FileUp,
-    Folder, FolderPlus, Globe2, History, Layers3, MoveRight, Pencil, Plus, Search, Settings2, Trash2
+    Folder, FolderPlus, Globe2, History, Inbox, Layers3, MoveRight, Pencil, Plus, Search, Settings2, Trash2
   } from '@lucide/svelte';
-  import type { ApiRequest, Collection, CollectionFolder, Environment, PostcallWorkspace } from '../lib/types';
+  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, PostcallWorkspace } from '../lib/types';
 
   export let workspace: PostcallWorkspace;
   export let workspaces: PostcallWorkspace[];
@@ -17,6 +17,8 @@
   export let selectedRequestId = '';
   export let onSection: (section: 'collections' | 'history' | 'environments') => void;
   export let onOpenRequest: (request: ApiRequest) => void;
+  export let onOpenHistoryEntry: (entry: HistoryEntry) => void;
+  export let onDeleteHistoryEntry: (entry: HistoryEntry) => void;
   export let onNewRequest: () => void;
   export let onNewCollection: () => void;
   export let onNewEnvironment: () => void;
@@ -27,6 +29,7 @@
   export let onSelectEnvironment: (environment: Environment) => void;
   export let onExportEnvironment: (environment: Environment) => void;
   export let onDeleteEnvironment: (environment: Environment) => void;
+  export let justImportedEnvironmentIds: string[] = [];
   export let onAddRequestToCollection: (collection: Collection) => void;
   export let onAddFolder: (collection: Collection) => void;
   export let onRenameCollection: (collection: Collection, name: string) => void;
@@ -149,7 +152,7 @@
         <button class="icon-button" on:click={() => onNewRequest()} title="New request"><Plus size={15} /></button>
       {:else}
         <input class="hidden-file-input" bind:this={environmentFileInput} type="file" accept="application/json,.json,.postman_environment" multiple on:change={(event) => { onImportEnvironments(event.currentTarget.files); event.currentTarget.value = ''; }} />
-        <button class="icon-button" on:click={() => environmentFileInput.click()} title="Import environment JSON" aria-label="Import environment JSON"><FileUp size={15} /></button>
+        <button class="icon-button" on:click={() => environmentFileInput.click()} title="Import environment JSON" aria-label="Import environment JSON"><Inbox size={15} /></button>
         <button class="icon-button" on:click={onNewEnvironment} title="New environment"><Plus size={15} /></button>
       {/if}
     </div>
@@ -260,18 +263,21 @@
       {/if}
     {:else if activeSection === 'history'}
       {#each workspace.history.filter(h => !query || h.request.name.toLowerCase().includes(query) || h.request.url.toLowerCase().includes(query)) as item (item.id)}
-        <button class="history-row" on:click={() => onOpenRequest(item.request)}>
-          <span class="method mini {item.request.method.toLowerCase()}">{item.request.method.slice(0, 3)}</span>
-          <span class="history-main"><strong>{item.request.name}</strong><small>{item.request.url}</small></span>
-          <span class="history-side"><small class:ok={item.status && item.status < 400}>{item.status ?? 'ERR'}</small><time>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></span>
-        </button>
+        <div class="history-row">
+          <button class="history-row-main" on:click={() => onOpenHistoryEntry(item)}>
+            <span class="method mini {item.request.method.toLowerCase()}">{item.request.method.slice(0, 3)}</span>
+            <span class="history-main"><strong>{item.request.name}</strong><small>{item.request.url}</small></span>
+            <span class="history-side"><small class:ok={item.status && item.status < 400}>{item.status ?? 'ERR'}</small><time>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></span>
+          </button>
+          <button class="icon-button" on:click={() => onDeleteHistoryEntry(item)} title="Delete this history entry" aria-label={`Delete history entry for ${item.request.name}`}><Trash2 size={13} /></button>
+        </div>
       {/each}
       {#if !workspace.history.length}
         <div class="sidebar-empty"><Clock3 size={24} /><p>Requests you send will appear here.</p></div>
       {/if}
     {:else}
       {#each workspace.environments.filter(e => !query || e.name.toLowerCase().includes(query)) as environment (environment.id)}
-        <div class="environment-row">
+        <div class="environment-row" class:just-imported={justImportedEnvironmentIds.includes(environment.id)}>
           <button class="environment-row-main" on:click={() => onSelectEnvironment(environment)}>
             <div class="environment-icon"><Globe2 size={15} /></div>
             <span><strong>{environment.name}</strong><small>{environment.variables.filter(v => v.key).length} variables</small></span>
@@ -282,7 +288,7 @@
         </div>
       {/each}
       {#if !workspace.environments.length}
-        <div class="sidebar-empty"><Globe2 size={24} /><p>No environments yet</p><button on:click={onNewEnvironment}>Create environment</button><button on:click={() => environmentFileInput.click()}>Import JSON</button></div>
+        <div class="sidebar-empty"><Globe2 size={24} /><p>No environments yet</p><button on:click={onNewEnvironment}>Create environment</button><button on:click={() => environmentFileInput.click()}>Import environment JSON</button></div>
       {/if}
     {/if}
   </div>

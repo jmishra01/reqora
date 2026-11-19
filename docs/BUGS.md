@@ -17,16 +17,24 @@ Medium (gets in the way, looks broken) · Low (rough edge).
 | BUG-4 | 2026-11-19 | Sidebar: Environments-tab-only toolbar buttons render on the empty History tab | Medium | Fixed (uncommitted) |
 | BUG-5 | 2026-11-19 | No duplicate-name detection when importing environments | Medium | Fixed (uncommitted) |
 | BUG-6 | 2026-11-19 | No preview or confirmation before an imported environment lands in the workspace | Medium | Fixed (uncommitted) — resolved by BUG-1 (accurate toast), BUG-3 (can now delete a bad import), and BUG-5 (no more duplicate confusion) |
-| BUG-7 | 2026-11-19 | Environment export filename collapses to "-" for non-Latin/emoji-only names, causing collisions | Low | Open |
-| BUG-8 | 2026-11-19 | Postman "Globals" export files are silently imported as a regular named Environment | Low | Open |
-| BUG-9 | 2026-11-19 | Two different focus-ring visual treatments now coexist (URL bar vs. kv-row inputs) | Low | Open |
-| BUG-10 | 2026-11-19 | `.custom-check` checkbox border wasn't migrated to `--border-strong` | Low | Open |
-| BUG-11 | 2026-11-19 | `.environment-row` gap is tighter than sibling `.history-row`, cramming the new export icon | Low | Open |
-| BUG-12 | 2026-11-19 | Environment import icon easy to mistake for "New environment" | Low | Open |
-| BUG-13 | 2026-11-19 | Two import entry points use different label text for the same action | Low | Open |
-| BUG-14 | 2026-11-19 | No visual indication of which environment(s) were just imported | Low | Open |
+| BUG-7 | 2026-11-19 | Environment export filename collapses to "-" for non-Latin/emoji-only names, causing collisions | Low | Fixed (uncommitted) |
+| BUG-8 | 2026-11-19 | Postman "Globals" export files are silently imported as a regular named Environment | Low | Fixed (uncommitted) |
+| BUG-9 | 2026-11-19 | Two different focus-ring visual treatments now coexist (URL bar vs. kv-row inputs) | Low | Fixed (uncommitted) |
+| BUG-10 | 2026-11-19 | `.custom-check` checkbox border wasn't migrated to `--border-strong` | Low | Fixed (uncommitted) |
+| BUG-11 | 2026-11-19 | `.environment-row` gap is tighter than sibling `.history-row`, cramming the new export icon | Low | Fixed (uncommitted) |
+| BUG-12 | 2026-11-19 | Environment import icon easy to mistake for "New environment" | Low | Fixed (uncommitted) |
+| BUG-13 | 2026-11-19 | Two import entry points use different label text for the same action | Low | Fixed (uncommitted) |
+| BUG-14 | 2026-11-19 | No visual indication of which environment(s) were just imported | Low | Fixed (uncommitted) |
 | BUG-15 | 2026-11-19 | Environment file picker's `accept` attribute includes a dead, never-matching extension | Low | Open |
 | BUG-16 | 2026-11-19 | Environment importer silently drops/garbles malformed variable entries with no warning | Low | Open |
+| BUG-17 | 2026-11-19 | Command palette has no input to type into, so typing while it's open silently edits the field behind it | High | Fixed (uncommitted) |
+| BUG-18 | 2026-11-19 | "Unsaved changes" is a single global flag shared by every open request tab | High | Fixed (uncommitted) |
+| BUG-19 | 2026-11-19 | Request history only stores status/timing, never the actual response body/headers | High | Fixed (uncommitted) |
+| BUG-20 | 2026-11-19 | History has no per-item delete, only "Clear history" wipes everything at once | Medium | Fixed (uncommitted) |
+| BUG-21 | 2026-11-19 | "OAuth 2.0" auth type is Bearer Token relabeled — no real token-fetching flow | Medium | Fixed (uncommitted) |
+| BUG-22 | 2026-11-19 | Collection export drops folder-level variables (only top-level collection variables are exported) | Medium | Fixed (uncommitted) |
+| BUG-23 | 2026-11-19 | Command palette can't search or jump to a saved request, collection, or environment | Medium | Fixed (uncommitted) |
+| BUG-24 | 2026-11-19 | Code generation is missing common languages (Java, Ruby) | Low | Fixed (uncommitted) |
 
 ## BUG-1 — Environment import: a failing file in a multi-file import ghosts earlier files in memory, unsaved and invisible
 
@@ -205,7 +213,7 @@ preview/confirm dialog remains a possible future improvement if it still feels n
 
 ## BUG-7 — Environment export filename collapses to "-" for non-Latin/emoji-only names, causing collisions
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** QA/Tester (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Name an environment using only non-ASCII-alphanumeric characters, e.g. `"🎉🎉"` or
@@ -219,11 +227,16 @@ fallback and no disambiguator when the result collapses to empty/dash.
 **Suggested fix:** Keep Unicode letters in the sanitizer, or append the environment's id/timestamp
 when the sanitized name collapses to empty or a lone dash.
 
+**Fix applied:** Added `sanitizeFilename()` (`src/App.svelte`), shared by collection and
+environment export, which falls back to `<fallback>-<8 random hex chars>` whenever the slug
+collapses to empty. Verified live: exporting an environment named `🎉🎉` now downloads
+`environment-02d6cd23.postman_environment.json` instead of `-.postman_environment.json`.
+
 ---
 
 ## BUG-8 — Postman "Globals" export files are silently imported as a regular named Environment
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** PM, QA/Tester (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Export "Globals" from Postman (same JSON shape as an Environment export, differing only
@@ -237,11 +250,17 @@ global/always-on scope concept, and nothing in the UI says this file wasn't real
 **Suggested fix:** Detect `_postman_variable_scope === "globals"` and show a toast noting it was
 imported as a regular environment, since Postcall has no global-scope equivalent yet.
 
+**Fix applied:** `parsePostmanEnvironment` (`src/lib/importers.ts`) now returns
+`{ environment, warning }`, setting `warning` when `_postman_variable_scope === 'globals'`.
+`importEnvironmentFiles` appends any warnings to the summary toast. Verified live: importing a
+Globals-shaped file shows "1 of 1 environment imported — "My Globals" looks like a Postman
+Globals export, not an Environment — imported as a regular environment."
+
 ---
 
 ## BUG-9 — Two different focus-ring visual treatments now coexist
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** UI (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Focus the request URL bar, then focus a key/value cell in Params/Headers.
@@ -253,11 +272,15 @@ inset `var(--accent)` box-shadow with no softening. Both rules were touched by t
 
 **Suggested fix:** Standardize on one focus-ring treatment for text inputs in the request panel.
 
+**Fix applied:** `.kv-row > input:focus` (`src/styles.css`) now uses
+`box-shadow: inset 0 0 0 2px var(--accent-soft)` — the same soft accent-tint language as the URL
+bar's focus ring, instead of a hard solid 1px `var(--accent)` outline.
+
 ---
 
 ## BUG-10 — `.custom-check` checkbox border wasn't migrated to `--border-strong`
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** UI (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Open Params/Headers and look at a row checkbox, especially in the `.light` theme.
@@ -269,11 +292,13 @@ visibly darker/heavier and doesn't pick up midnight/forest/ocean tinting either.
 
 **Suggested fix:** Change to `border: 1px solid var(--border-strong);`.
 
+**Fix applied:** Changed to `border: 1px solid var(--border-strong);` in `src/styles.css`.
+
 ---
 
 ## BUG-11 — `.environment-row` gap is tighter than sibling `.history-row`
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** UI (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Open the Environments tab with at least one environment; zoom on the right side of a
@@ -286,11 +311,14 @@ chevron than the equivalent spacing elsewhere.
 
 **Suggested fix:** Bump `.environment-row`'s outer gap to ~6-7px to match `.history-row`.
 
+**Fix applied:** Both `.environment-row` and the new `.history-row` (added while fixing BUG-19/20)
+now use a 6px outer gap, matched to each other.
+
 ---
 
 ## BUG-12 — Environment import icon easy to mistake for "New environment"
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** UX (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Look at the Environments tab header: a 15px `FileUp` icon sits directly next to a 15px
@@ -304,11 +332,15 @@ weakness.
 **Suggested fix:** Use a less ambiguous "import" icon (e.g. down-into-tray), or add a visible label
 in addition to the hover title.
 
+**Fix applied:** Swapped the toolbar button's icon from `FileUp` to `Inbox`
+(`src/components/Sidebar.svelte`), visually distinct from the `Plus` "New environment" icon next
+to it.
+
 ---
 
 ## BUG-13 — Two import entry points use different label text for the same action
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** UX (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Compare the toolbar icon button's label ("Import environment JSON",
@@ -319,11 +351,14 @@ given different text.
 
 **Suggested fix:** Use the same label in both places.
 
+**Fix applied:** The empty-state button's label (`src/components/Sidebar.svelte`) now reads
+"Import environment JSON", matching the toolbar button exactly.
+
 ---
 
 ## BUG-14 — No visual indication of which environment(s) were just imported
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed (uncommitted)
 **Found by:** UX (role-review, [2026-11-19](reviews/2026-11-19-postman-environment-import-export.md))
 
 **Steps:** Import an environment. It lands at the bottom of the list with the same icon and row
@@ -335,6 +370,11 @@ and shows a toast; it doesn't select, scroll to, or open the newly-added environ
 
 **Suggested fix:** Briefly highlight/scroll to the new row(s), or open the first imported
 environment's editor so the user can confirm its contents.
+
+**Fix applied:** `importEnvironmentFiles` (`src/App.svelte`) now records the imported ids in
+`justImportedEnvironmentIds` for 4 seconds; `Sidebar.svelte` applies a `.just-imported` class that
+tints the row with `var(--accent-soft)` and fades out. Auto-scroll was not added — out of scope
+for this pass.
 
 ---
 
@@ -372,3 +412,171 @@ indicates this.
 
 **Suggested fix:** Low priority. Optionally trim before the truthy check, and warn when an
 imported environment ends up with 0 real variables.
+
+---
+
+## BUG-17 — Command palette has no input to type into, so typing while it's open silently edits the field behind it
+
+**Severity:** High · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Open the command palette (toolbar icon) while the request URL field has focus, then
+type. Reproduced live: typing "token" with the palette open inserted the literal text "token"
+into the request URL in the background (`tokenhttps://httpbin.org/anything?...`), because the
+palette's `{#if utilityModal === 'command'}` block (`src/App.svelte`) rendered only a static list
+of 4 buttons — no focusable text input existed anywhere in the modal, so keyboard focus (and every
+keystroke) stayed on whatever was focused before the modal opened.
+
+**Cause:** `src/App.svelte` (command palette template) had no `<input>` at all.
+
+**Fix applied:** Added a real, autofocused search `<input>` (`use:autofocusAction`, a tiny Svelte
+action that calls `node.focus()` on mount) with `on:keydown={(e) => e.stopPropagation()}` so
+typing can never leak to `handleKeydown`/background fields. Verified live: typing "token" with the
+palette open now filters its own results and the request URL field is untouched.
+
+---
+
+## BUG-18 — "Unsaved changes" is a single global flag shared by every open request tab
+
+**Severity:** High · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Open two request tabs. Edit one. Reproduced live: the *other*, untouched tab also shows
+the "Unsaved changes" dot and label, because `let saved = true;` (`src/App.svelte`) was a single
+component-wide boolean, not tracked per request id.
+
+**Cause:** Every mutation site (`markChanged`, `saveActiveRequest`, `resetRequestSession`, etc.)
+read/wrote the single `saved` variable regardless of which tab was active.
+
+**Fix applied:** Replaced `saved` with `unsavedTabs: Record<string, boolean>`, keyed by request
+id, updated at every site that used to touch `saved` (including cleanup on tab close). The
+per-tab dot (`{#if unsavedTabs[request.id]}`) and the active tab's "Saved"/"Unsaved changes" label
+now read only that tab's own entry. Verified live: editing one tab no longer marks a second,
+untouched tab as unsaved, and switching back to the edited tab still shows its own correct state.
+
+---
+
+## BUG-19 — Request history only stores status/timing, never the actual response
+
+**Severity:** High · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Send a request, then click its entry in History. Previously: `HistoryEntry`
+(`src/lib/types.ts`) only carried `status`/`elapsedMs`/`createdAt` — never the response body or
+headers — and clicking a history row called `onOpenRequest` (`openRequest`), which just reopens
+the live, editable request tab with `response = null`. There was no way to see what a past request
+actually returned without resending it (risky for non-idempotent requests, or if the data has
+since changed).
+
+**Cause:** `HistoryEntry` had no `response`/`requestError` field; `sendRequest` and the journey
+runner (`src/App.svelte`) never captured one.
+
+**Fix applied:** Added `response?: ResponseData` and `requestError?: string` to `HistoryEntry`.
+`sendRequest` and the journey step runner now store a (size-capped at 300,000 chars via
+`truncateResponseForHistory`) copy of the response or error on every history entry. A new
+`openHistoryEntry` opens the request tab and sets `response`/`requestError` from the stored entry
+instead of leaving them null. Verified live: clicking a history row now shows the exact stored
+response instantly, with no resend.
+
+---
+
+## BUG-20 — History has no per-item delete, only "Clear history" wipes everything
+
+**Severity:** Medium · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Try to remove a single history entry. Only a single "Clear history" action existed
+(`src/App.svelte`/`Sidebar.svelte`), which deletes all 200 entries at once.
+
+**Cause:** `Sidebar.svelte`'s history row had no delete control or handler.
+
+**Fix applied:** Restructured the history row into a main button + a `Trash2` icon-button (same
+pattern as the environment row's delete button), wired to a new `onDeleteHistoryEntry` prop and
+`deleteHistoryEntry()` in `src/App.svelte`. Verified live: deleting one entry removes only that
+row and updates the count badge.
+
+---
+
+## BUG-21 — "OAuth 2.0" auth type is Bearer Token relabeled — no real token-fetching flow
+
+**Severity:** Medium · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Select "OAuth 2.0" as the auth type. Previously it showed only "Access token" and
+"Header prefix" fields — identical to Bearer Token — with no client id/secret, token URL, or way
+to actually fetch a token. Users had to obtain an access token some other way and paste it in,
+repeating this every time it expired.
+
+**Cause:** `RequestAuth` (`src/lib/types.ts`) had no OAuth-specific fields, and the auth editor
+(`src/App.svelte`, both the request-level and the collection/folder scope-settings editors)
+rendered the `oauth2` branch identically to `bearer`/`jwt-bearer`.
+
+**Fix applied:** Added `oauthGrantType`, `oauthTokenUrl`, `oauthClientId`, `oauthClientSecret`,
+`oauthScope`, `oauthUsername`, `oauthPassword`, `oauthClientAuthHeader` to `RequestAuth`. Added
+`fetchOAuthToken()` (`src/App.svelte`), which POSTs a `client_credentials` or
+`password`-grant request (client credentials sent as a Basic Auth header or in the body, per a
+checkbox) via the existing `executeRequest` bridge, parses the JSON response, and sets
+`auth.token` from `access_token` on success. Added a "Get New Access Token" button and the new
+fields to both auth editors. OAuth's interactive `authorization_code` flow (needing a redirect
+URI/local callback) and refresh-token handling were explicitly left out of scope. Verified live
+end-to-end against `https://httpbin.org/post`: the request is actually sent with the constructed
+form body, the JSON response is parsed, and the absence of `access_token` correctly surfaces
+"Token request failed with HTTP 200." — proving the full request/parse/error path works; a real
+token endpoint would populate `auth.token` the same way.
+
+---
+
+## BUG-22 — Collection export drops folder-level variables
+
+**Severity:** Medium · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Set a variable on a folder (via "Variables & authorization"), then export the
+collection. Previously: `exportCollection`'s folder mapping (`src/App.svelte`) emitted
+`{ name, auth, item }` with no `variable` key, so folder-scoped variables were silently dropped
+from the exported Postman JSON, even though `parsePostmanCollection` (`src/lib/importers.ts:228`)
+already reads a folder's `variable` array back in on import — making the round-trip asymmetric.
+
+**Cause:** Missing `variable: ...` in the folder-item object literal in `exportCollection`.
+
+**Fix applied:** Extracted a shared `toVariableList()` helper and used it for both the
+collection's own `variable` array and each folder's. Verified live: a folder variable
+(`folderVar: hello123`) now appears in the exported JSON's folder item.
+
+---
+
+## BUG-23 — Command palette can't search or jump to a saved request, collection, or environment
+
+**Severity:** Medium · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Open the command palette and try to find a specific saved request by name. Previously
+it only offered 4 fixed actions (New request, New collection, Environments, Settings) — no way to
+jump to existing content, unlike a "real" command palette (VS Code/Slack-style).
+
+**Cause:** The palette rendered a static button list with no search/filter logic at all.
+
+**Fix applied:** Added the search input from BUG-17, plus reactive matches against
+`savedRequests`, `workspace.collections`, and `workspace.environments` (substring match, capped
+to 5-8 results per group), each opening the corresponding item on click
+(`runCommandOpenRequest`/`runCommandOpenCollection`/`runCommandOpenEnvironment`). Also added a
+`⌘K` shortcut to open the palette. Verified live: typing "token" surfaces "Step 1 - Get token"
+and "Step 2 - Use token" as results, and clicking one opens it.
+
+---
+
+## BUG-24 — Code generation is missing common languages (Java, Ruby)
+
+**Severity:** Low · **Status:** Fixed (uncommitted)
+**Found by:** long-time-user audit, 2026-11-19
+
+**Steps:** Open "Generate code". Only curl, JavaScript, Python, Go, Rust, C#, and PHP were
+available.
+
+**Cause:** `codeLanguageOptions`/`generateRequestCode` (`src/lib/codegen.ts`) had no Java or Ruby
+generator.
+
+**Fix applied:** Added `generateJava()` (`java.net.http.HttpClient`, manual multipart
+construction) and `generateRuby()` (`Net::HTTP`, manual multipart construction), registered in
+`codeLanguageOptions` and the dispatcher. Verified live: both render valid-looking, runnable code
+for the active request.

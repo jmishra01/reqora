@@ -32,6 +32,14 @@ export type RequestAuth = {
   value?: string;
   placement?: 'header' | 'query';
   prefix?: string;
+  oauthGrantType?: 'client_credentials' | 'password';
+  oauthTokenUrl?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+  oauthScope?: string;
+  oauthUsername?: string;
+  oauthPassword?: string;
+  oauthClientAuthHeader?: boolean;
 };
 
 export type ApiRequest = {
@@ -104,6 +112,8 @@ export type HistoryEntry = {
   status?: number;
   elapsedMs?: number;
   createdAt: string;
+  response?: ResponseData;
+  requestError?: string;
 };
 
 export type JourneyExtractionSource = 'json' | 'header' | 'body' | 'status';

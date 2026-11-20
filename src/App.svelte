@@ -10,7 +10,7 @@
   import FormDataEditor from './components/FormDataEditor.svelte';
   import CodeEditor from './components/CodeEditor.svelte';
   import ResponseViewer from './components/ResponseViewer.svelte';
-  import PostcallIcon from './components/postcall.svelte';
+  import ReqoraIcon from './components/reqora.svelte';
   import SyncSettings from './components/SyncSettings.svelte';
   import { executeRequest, getProcessMetrics, loadBrowserWorkspace, loadWorkspace, openStorageLocation, saveWorkspace } from './lib/bridge';
   import type { ProcessMetrics } from './lib/bridge';
@@ -19,7 +19,7 @@
   import type { CodeLanguage } from './lib/codegen';
   import { blankWorkspace, initialWorkspaceStore, normalizeRequest, normalizeWorkspaceStore } from './lib/workspace';
   import { blankRequest, blankRow, uid } from './lib/types';
-  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, Journey, JourneyExtraction, KeyValue, PostcallWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
+  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, Journey, JourneyExtraction, KeyValue, ReqoraWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
   import { getLinkedRepository, type SyncConflict, type SyncError } from './lib/sync';
   import { runPreRequestScript, type ScriptConsoleEntry } from './lib/scripting';
 
@@ -50,9 +50,9 @@
   };
 
   const defaultWorkspaceStore = initialWorkspaceStore();
-  let workspaces: PostcallWorkspace[] = defaultWorkspaceStore.workspaces;
+  let workspaces: ReqoraWorkspace[] = defaultWorkspaceStore.workspaces;
   let activeWorkspaceId = defaultWorkspaceStore.activeWorkspaceId;
-  let workspace: PostcallWorkspace = workspaces[0];
+  let workspace: ReqoraWorkspace = workspaces[0];
   let activeSection: SidebarSection = 'collections';
   let openRequests: ApiRequest[] = [];
   let activeRequestId = '';
@@ -75,7 +75,7 @@
   let utilityModal: UtilityModal = null;
   let pendingDeleteCollection: Collection | null = null;
   let pendingDeleteEnvironment: Environment | null = null;
-  let pendingDeleteWorkspace: PostcallWorkspace | null = null;
+  let pendingDeleteWorkspace: ReqoraWorkspace | null = null;
   let createWorkspaceOpen = false;
   let workspaceNameInput = '';
   let pendingRequestAction: RequestAction | null = null;
@@ -197,7 +197,7 @@
   $: commandHasMatches = Boolean(commandActions.length || commandRequestMatches.length || commandCollectionMatches.length || commandEnvironmentMatches.length);
 
   onMount(async () => {
-    const savedTheme = localStorage.getItem('postcall.theme');
+    const savedTheme = localStorage.getItem('reqora.theme');
     if (['dark', 'light', 'midnight', 'forest', 'ocean'].includes(savedTheme ?? '')) theme = savedTheme as AppTheme;
     const refreshMetrics = () => getProcessMetrics().then((value) => processMetrics = value).catch(() => processMetrics = null);
     refreshMetrics();
@@ -217,7 +217,7 @@
 
   function selectTheme(value: AppTheme) {
     theme = value;
-    localStorage.setItem('postcall.theme', value);
+    localStorage.setItem('reqora.theme', value);
   }
 
   async function revealStorage() {
@@ -249,7 +249,7 @@
     saveWorkspace({ workspaces, activeWorkspaceId }).catch(console.error);
   }
 
-  function resetRequestSession(target: PostcallWorkspace) {
+  function resetRequestSession(target: ReqoraWorkspace) {
     const savedRequest = target.collections[0]?.requests[0] ?? target.collections[0]?.folders[0]?.requests[0];
     const first = savedRequest ?? blankRequest();
     openRequests = [structuredClone(normalizeRequest(first))];
@@ -297,7 +297,7 @@
     showToast('Workspace created');
   }
 
-  function deleteWorkspace(target: PostcallWorkspace) {
+  function deleteWorkspace(target: ReqoraWorkspace) {
     if (workspaces.length === 1) {
       showToast('At least one workspace is required');
       return;
@@ -1343,7 +1343,7 @@
       const barWidth = Math.max(1, (width - gap * Math.max(0, values.length - 1)) / Math.max(values.length, 1));
       return values.map((value, index) => `${color} rg ${x + index * (barWidth + gap)} ${y} ${barWidth} ${Math.max(1, value / max * height)} re f`).join('\n') + '\n';
     };
-    let page1 = text(42, 750, 'POSTcall', 18, '.95 .34 .12') + text(145, 752, 'LOAD TEST REPORT', 11, '.35 .39 .45');
+    let page1 = text(42, 750, 'REQORA', 18, '.95 .34 .12') + text(145, 752, 'LOAD TEST REPORT', 11, '.35 .39 .45');
     page1 += text(42, 724, `${activeRequest.method}  ${activeRequest.name}`, 15) + text(42, 708, activeRequest.url.slice(0, 100), 8, '.35 .39 .45');
     page1 += text(42, 691, `Generated ${new Date().toLocaleString()}  |  ${loadTestRunMode === 'requests' ? `${loadTestTotal} requested` : `${loadTestDurationHours} hours`}  |  Concurrency ${loadTestConcurrency}`, 8, '.35 .39 .45') + rule(680);
     page1 += heading(655, 'Executive summary');
@@ -1360,9 +1360,9 @@
     page1 += heading(195, 'Network and response data');
     page1 += text(42, 170, `${loadTestTimingAverages.map((item) => `${item.key.replace('Ms', '').toUpperCase()} ${item.value === null ? 'N/A' : `${item.value} ms`}`).join('  |  ')}`, 9);
     page1 += text(42, 150, `Average response ${formatBytes(loadTestAverageBytes)}  |  Transfer rate ${formatBytes(loadTestBytesPerSecond)}/s  |  Peak concurrency ${loadTestPeakActive}`, 9);
-    page1 += text(42, 36, 'POSTcall load test report', 7, '.45 .48 .52') + text(540, 36, '1 / 2', 7, '.45 .48 .52');
+    page1 += text(42, 36, 'Reqora load test report', 7, '.45 .48 .52') + text(540, 36, '1 / 2', 7, '.45 .48 .52');
 
-    let page2 = text(42, 750, 'POSTcall', 18, '.95 .34 .12') + text(145, 752, 'PERFORMANCE DETAILS', 11, '.35 .39 .45') + rule(730);
+    let page2 = text(42, 750, 'REQORA', 18, '.95 .34 .12') + text(145, 752, 'PERFORMANCE DETAILS', 11, '.35 .39 .45') + rule(730);
     page2 += heading(705, 'Performance over time');
     const series = loadTestSeries.length ? loadTestSeries : [{ rps: loadTestRps, p95: loadTestP95, errorRate: loadTestErrorRate } as LoadSnapshot];
     page2 += text(42, 680, 'Throughput (requests/second)', 8) + bars(series.map((item) => item.rps), 42, 585, 528, 80, '.95 .34 .12');
@@ -1630,12 +1630,12 @@
   <header class="topbar" data-tauri-drag-region>
     <div class="brand">
       <div class="brand-mark">
-      <PostcallIcon width=24 height=24/>
+      <ReqoraIcon width=24 height=24/>
       </div>
       <div>
       <span>POST</span><span class="app-call">call</span>
       </div>
-      <span class="version-badge" title={`Postcall version ${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
+      <span class="version-badge" title={`Reqora version ${__APP_VERSION__}`}>v{__APP_VERSION__}</span>
       <span class="local-badge">LOCAL</span>
     </div>
     <nav class="topnav"><span class="active">Workspace</span></nav>
@@ -1888,7 +1888,7 @@
     <span>Collections <strong>{workspace.collections.length}</strong></span>
     <span>Requests <strong>{savedRequestCount}</strong></span>
     <div class="status-spacer"></div>
-    {#if processMetrics}<span title="Local SQLite database, WAL, and shared-memory files">SQLite <strong>{formatBytes(processMetrics.storageBytes)}</strong></span><span title="Memory used by Postcall">RAM <strong>{(processMetrics.memoryBytes / 1024 / 1024).toFixed(0)} MB</strong></span><span title="CPU used by Postcall">CPU <strong>{processMetrics.cpuPercent.toFixed(1)}%</strong></span>{/if}
+    {#if processMetrics}<span title="Local SQLite database, WAL, and shared-memory files">SQLite <strong>{formatBytes(processMetrics.storageBytes)}</strong></span><span title="Memory used by Reqora">RAM <strong>{(processMetrics.memoryBytes / 1024 / 1024).toFixed(0)} MB</strong></span><span title="CPU used by Reqora">CPU <strong>{processMetrics.cpuPercent.toFixed(1)}%</strong></span>{/if}
     {#if gitLinkedRepo}
       <span
         class="status-git"
@@ -2126,7 +2126,7 @@
     <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget) curlImportOpen = false; }}>
       <div class="modal curl-import-modal" role="dialog" aria-modal="true" aria-label="Import cURL request">
         <div class="modal-header"><div><span class="modal-icon"><Code2 size={18} /></span><div><strong>Import cURL</strong><p>Paste a cURL command to open it as a new unsaved request.</p></div></div><button class="icon-button" on:click={() => curlImportOpen = false} aria-label="Close dialog"><X size={17} /></button></div>
-        <textarea bind:value={curlText} on:input={() => curlImportError = ''} aria-label="cURL command" spellcheck="false" placeholder={'curl --request POST \\\n  --url https://api.example.com/items \\\n  --header \'Content-Type: application/json\' \\\n  --data \'{"name":"Postcall"}\''}></textarea>
+        <textarea bind:value={curlText} on:input={() => curlImportError = ''} aria-label="cURL command" spellcheck="false" placeholder={'curl --request POST \\\n  --url https://api.example.com/items \\\n  --header \'Content-Type: application/json\' \\\n  --data \'{"name":"Reqora"}\''}></textarea>
         {#if curlImportError}<div class="import-error" role="alert">{curlImportError}</div>{/if}
         <div class="modal-footer"><button class="secondary-button" on:click={() => curlImportOpen = false}>Cancel</button><button class="primary-button" disabled={!curlText.trim()} on:click={importCurlRequest}>Import request</button></div>
       </div>
@@ -2148,7 +2148,7 @@
       <div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Delete workspace">
         <div class="confirm-mark">!</div>
         <strong>Delete “{pendingDeleteWorkspace.name}”?</strong>
-        <p>This permanently removes its {pendingDeleteWorkspace.collections.length} collections, {pendingDeleteWorkspace.environments.length} environments, and request history from Postcall.</p>
+        <p>This permanently removes its {pendingDeleteWorkspace.collections.length} collections, {pendingDeleteWorkspace.environments.length} environments, and request history from Reqora.</p>
         <div class="modal-footer"><button class="secondary-button" on:click={() => pendingDeleteWorkspace = null}>Cancel</button><button class="danger-button" on:click={confirmDeleteWorkspace}>Delete workspace</button></div>
       </div>
     </div>
@@ -2301,7 +2301,7 @@
     <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget) utilityModal = null; }}>
       <div class="modal utility-modal" class:code-generator-modal={utilityModal === 'code'} role="dialog" aria-modal="true" aria-label={`${utilityModal} dialog`}>
         <div class="modal-header">
-          <div><span class="modal-icon">{#if utilityModal === 'code'}<Code2 size={18} />{:else if utilityModal === 'variables'}<Braces size={18} />{:else if utilityModal === 'help'}<HelpCircle size={18} />{:else if utilityModal === 'settings'}<Settings2 size={18} />{:else}<Command size={18} />{/if}</span><div><strong>{utilityModal === 'code' ? 'Generate code' : utilityModal === 'variables' ? 'Resolved variables' : utilityModal === 'help' ? 'Postcall help' : utilityModal === 'settings' ? 'Application settings' : 'Command palette'}</strong><p>{utilityModal === 'code' ? 'Ready-to-run examples using the resolved URL, headers, authorization, and body.' : utilityModal === 'variables' ? 'Merged values and the scope supplying each one.' : utilityModal === 'help' ? 'Keyboard shortcuts and local workspace behavior.' : utilityModal === 'settings' ? 'Configure your local Postcall experience.' : 'Jump directly to a Postcall action.'}</p></div></div>
+          <div><span class="modal-icon">{#if utilityModal === 'code'}<Code2 size={18} />{:else if utilityModal === 'variables'}<Braces size={18} />{:else if utilityModal === 'help'}<HelpCircle size={18} />{:else if utilityModal === 'settings'}<Settings2 size={18} />{:else}<Command size={18} />{/if}</span><div><strong>{utilityModal === 'code' ? 'Generate code' : utilityModal === 'variables' ? 'Resolved variables' : utilityModal === 'help' ? 'Reqora help' : utilityModal === 'settings' ? 'Application settings' : 'Command palette'}</strong><p>{utilityModal === 'code' ? 'Ready-to-run examples using the resolved URL, headers, authorization, and body.' : utilityModal === 'variables' ? 'Merged values and the scope supplying each one.' : utilityModal === 'help' ? 'Keyboard shortcuts and local workspace behavior.' : utilityModal === 'settings' ? 'Configure your local Reqora experience.' : 'Jump directly to a Reqora action.'}</p></div></div>
           <button class="icon-button" on:click={() => utilityModal = null} aria-label="Close dialog"><X size={17} /></button>
         </div>
         {#if utilityModal === 'code'}
@@ -2396,7 +2396,7 @@
         {:else}
           <div class="help-content">
             <div><kbd>⌘ ↵</kbd><span>Send the active request</span></div><div><kbd>⌘ S</kbd><span>Save the active request</span></div><div><kbd>Drag</kbd><span>Resize the request and response panels</span></div>
-            <p>Postcall is local-first. Collections, environments, and history are stored on this device.</p>
+            <p>Reqora is local-first. Collections, environments, and history are stored on this device.</p>
           </div>
           <div class="modal-footer"><button class="primary-button" on:click={() => utilityModal = null}>Got it</button></div>
         {/if}

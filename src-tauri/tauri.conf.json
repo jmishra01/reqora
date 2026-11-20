@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Postcall",
+  "productName": "Reqora",
   "version": "0.1.0",
-  "identifier": "dev.postcall.desktop",
+  "identifier": "dev.reqora.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Postcall",
+        "title": "Reqora",
         "width": 1440,
         "height": 900,
         "minWidth": 980,
@@ -30,7 +30,7 @@
     "targets": "all",
     "category": "DeveloperTool",
     "shortDescription": "A fast, local-first API client",
-    "longDescription": "Postcall is a local-first desktop API client for organizing, sending, and testing HTTP requests.",
+    "longDescription": "Reqora is a local-first desktop API client for organizing, sending, and testing HTTP requests.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

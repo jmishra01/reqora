@@ -116,7 +116,7 @@
     <div class="gh-sync-fields">
       <div class="gh-sync-fields-row">
         <label class="field-label">Repository owner<input bind:value={repoOwner} placeholder="octocat" disabled={linking} /></label>
-        <label class="field-label">Repository name<input bind:value={repoName} placeholder="postcall-collections" disabled={linking} /></label>
+        <label class="field-label">Repository name<input bind:value={repoName} placeholder="reqora-collections" disabled={linking} /></label>
       </div>
       <label class="field-label">Branch<input bind:value={repoBranch} placeholder="main" disabled={linking} /></label>
       <label class="field-label">Personal access token<input type="password" bind:value={repoToken} placeholder="github_pat_…" disabled={linking} /></label>

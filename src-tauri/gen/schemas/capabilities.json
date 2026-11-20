@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default permissions for the Postcall desktop window","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Default permissions for the Reqora desktop window","local":true,"windows":["main"],"permissions":["core:default"]}}

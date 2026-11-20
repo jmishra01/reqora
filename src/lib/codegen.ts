@@ -247,7 +247,7 @@ function generateJava(input: RequestInput) {
   let bodyExpression = 'BodyPublishers.noBody()';
   const extraHeaders: Array<[string, string]> = [];
   if (input.multipart?.length) {
-    lines.push('        String boundary = "PostcallBoundary" + System.currentTimeMillis();', '        java.io.ByteArrayOutputStream multipartBody = new java.io.ByteArrayOutputStream();');
+    lines.push('        String boundary = "ReqoraBoundary" + System.currentTimeMillis();', '        java.io.ByteArrayOutputStream multipartBody = new java.io.ByteArrayOutputStream();');
     input.multipart.forEach((field) => {
       if (field.kind === 'file') {
         const fileName = field.fileName ?? 'upload.bin';

@@ -3,14 +3,14 @@
     ArrowDownAZ, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Download, Ellipsis, FilePlus2, FileUp,
     Folder, FolderPlus, Globe2, History, Inbox, Layers3, MoveRight, Pencil, Plus, Search, Settings2, Trash2
   } from '@lucide/svelte';
-  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, PostcallWorkspace } from '../lib/types';
+  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, ReqoraWorkspace } from '../lib/types';
 
-  export let workspace: PostcallWorkspace;
-  export let workspaces: PostcallWorkspace[];
+  export let workspace: ReqoraWorkspace;
+  export let workspaces: ReqoraWorkspace[];
   export let activeWorkspaceId: string;
   export let onSwitchWorkspace: (id: string) => void;
   export let onCreateWorkspace: () => void;
-  export let onDeleteWorkspace: (workspace: PostcallWorkspace) => void;
+  export let onDeleteWorkspace: (workspace: ReqoraWorkspace) => void;
   export let onImportCollections: (files: FileList | null) => void;
   export let onImportCurl: () => void;
   export let activeSection: 'collections' | 'history' | 'environments';

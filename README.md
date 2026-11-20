@@ -1,6 +1,6 @@
-# Postcall
+# Reqora
 
-Postcall is a fast, local-first desktop application for creating, organizing, sending, and debugging API requests without sending workspace data to an external service.
+Reqora is a fast, local-first desktop application for creating, organizing, sending, and debugging API requests without sending workspace data to an external service.
 
 ## What you can do
 
@@ -28,7 +28,7 @@ Authorization can be configured on individual requests or inherited from a folde
 
 ## Local-first by design
 
-Collections, workspaces, environments, and history remain on your device. Postcall does not send telemetry, and the application settings display the exact local storage path.
+Collections, workspaces, environments, and history remain on your device. Reqora does not send telemetry, and the application settings display the exact local storage path.
 
 Requests entered without a protocol are attempted with HTTPS first and retried using HTTP when HTTPS does not return a response.
 
@@ -38,7 +38,7 @@ Collections can optionally be synced through a GitHub repository you own, so the
 
 To link a repository, open Settings and provide:
 
-- **Repository owner and name** — the GitHub repo to store collections in (create an empty one first, e.g. `postcall-collections`).
+- **Repository owner and name** — the GitHub repo to store collections in (create an empty one first, e.g. `reqora-collections`).
 - **Branch** — the branch to read from and write to (`main` by default).
 - **A fine-grained personal access token** — scoped to read/write access to "Contents" on that one repository. The token is stored in your OS keychain (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux), never in the workspace file or the SQLite database.
 
@@ -53,6 +53,6 @@ Unlinking clears the stored config, the sync state, and the keychain token, and 
 
 ## Interface
 
-Postcall includes request tabs, resizable request and response panels, searchable collections and history, light and dark themes, keyboard-friendly request sending, and menus that close automatically when you click elsewhere in the application.
+Reqora includes request tabs, resizable request and response panels, searchable collections and history, light and dark themes, keyboard-friendly request sending, and menus that close automatically when you click elsewhere in the application.
 
 For downloads, installation, development, builds, release packaging, and implementation technologies, see [installation.md](installation.md).

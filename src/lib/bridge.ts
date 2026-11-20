@@ -73,12 +73,12 @@ export async function loadWorkspace(): Promise<WorkspaceStore | WorkspaceState |
 }
 
 export async function saveWorkspace(workspace: WorkspaceStore): Promise<void> {
-  localStorage.setItem('postcall.workspace', JSON.stringify(workspace));
+  localStorage.setItem('reqora.workspace', JSON.stringify(workspace));
   if (isTauri()) await invoke('save_workspace', { workspace });
 }
 
 export async function getStoragePath(): Promise<string> {
-  if (!isTauri()) return 'Browser localStorage · postcall.workspace';
+  if (!isTauri()) return 'Browser localStorage · reqora.workspace';
   return invoke<string>('get_storage_path');
 }
 
@@ -95,7 +95,7 @@ export async function getProcessMetrics(): Promise<ProcessMetrics | null> {
 }
 
 export function loadBrowserWorkspace(): WorkspaceStore | WorkspaceState | null {
-  const saved = localStorage.getItem('postcall.workspace');
+  const saved = localStorage.getItem('reqora.workspace');
   if (!saved) return null;
   try {
     return JSON.parse(saved) as WorkspaceStore | WorkspaceState;

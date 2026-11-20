@@ -147,14 +147,14 @@ export type WorkspaceState = {
   journeys: Journey[];
 };
 
-export type PostcallWorkspace = WorkspaceState & {
+export type ReqoraWorkspace = WorkspaceState & {
   id: string;
   name: string;
 };
 
 export type WorkspaceStore = {
   activeWorkspaceId: string;
-  workspaces: PostcallWorkspace[];
+  workspaces: ReqoraWorkspace[];
 };
 
 export type RequestInput = {

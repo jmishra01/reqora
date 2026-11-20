@@ -8,7 +8,7 @@ use tauri::State;
 
 use crate::AppState;
 
-const KEYRING_SERVICE: &str = "postcall";
+const KEYRING_SERVICE: &str = "reqora";
 const KEYRING_USER: &str = "github-token";
 const API_BASE: &str = "https://api.github.com";
 
@@ -408,7 +408,7 @@ fn read_config(database: &Connection) -> Result<Option<GitHubConfig>, String> {
 
 fn build_client() -> Result<Client, String> {
     Client::builder()
-        .user_agent(format!("Postcall/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("Reqora/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|error| format!("Could not initialize GitHub client: {error}"))
 }

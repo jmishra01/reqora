@@ -47,7 +47,7 @@ input::placeholder, textarea::placeholder { color: #5f646e; }
 
 .topbar { height: 52px; flex: 0 0 52px; display: flex; align-items: center; border-bottom: 1px solid var(--line); padding: 0 13px 0 17px; background: var(--panel); user-select: none; }
 .brand { display: flex; align-items: center; gap: 9px; width: 260px; font-weight: 700; letter-spacing: -.3px; font-size: 16px; }
-/* The previous gradient badge is intentionally disabled in favor of the Postcall SVG mark. */
+/* The previous gradient badge is intentionally disabled in favor of the Reqora SVG mark. */
 .app-call {color: var(--green)}
 .version-badge { margin-left: -4px; color: var(--muted-2); font-family: var(--mono); font-size: 8px; font-weight: 500; letter-spacing: 0; }
 .local-badge { font-size: 8px; letter-spacing: 1px; color: var(--muted); border: 1px solid var(--line); padding: 2px 4px; border-radius: 4px; font-weight: 600; }

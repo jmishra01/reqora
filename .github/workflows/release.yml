@@ -75,11 +75,11 @@ jobs:
           tauriScript: npm run tauri
           args: ${{ matrix.args }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('Postcall {0}', github.ref_name) || '' }}
-          releaseBody: Install Postcall using the asset for your operating system and CPU architecture.
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('Reqora {0}', github.ref_name) || '' }}
+          releaseBody: Install Reqora using the asset for your operating system and CPU architecture.
           releaseDraft: false
           prerelease: false
           generateReleaseNotes: true
           uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: postcall-[platform]-[arch]-[bundle]
-          releaseAssetNamePattern: postcall-[version]-[platform]-[arch][setup][ext]
+          workflowArtifactNamePattern: reqora-[platform]-[arch]-[bundle]
+          releaseAssetNamePattern: reqora-[version]-[platform]-[arch][setup][ext]

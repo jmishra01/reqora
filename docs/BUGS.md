@@ -1,6 +1,6 @@
 # Bug log
 
-Every bug found in Postcall, whoever found it and however: reported by the user, found in a
+Every bug found in Reqora, whoever found it and however: reported by the user, found in a
 role-review pass, or caught while building. Newest first. Each entry says where it is, how to
 make it happen, why it happened, and how it was fixed (commit and the test that keeps it fixed),
 or that it's still open.
@@ -241,14 +241,14 @@ collapses to empty. Verified live: exporting an environment named `🎉🎉` now
 
 **Steps:** Export "Globals" from Postman (same JSON shape as an Environment export, differing only
 in `_postman_variable_scope: "globals"`) and import it via "Import environment JSON". It imports
-without error as an ordinary Environment the user must manually select — Postcall has no
+without error as an ordinary Environment the user must manually select — Reqora has no
 global/always-on scope concept, and nothing in the UI says this file wasn't really an environment.
 
 **Cause:** `src/lib/importers.ts:192-204` (`parsePostmanEnvironment`) only checks
 `Array.isArray(root.values)` and never inspects `_postman_variable_scope`.
 
 **Suggested fix:** Detect `_postman_variable_scope === "globals"` and show a toast noting it was
-imported as a regular environment, since Postcall has no global-scope equivalent yet.
+imported as a regular environment, since Reqora has no global-scope equivalent yet.
 
 **Fix applied:** `parsePostmanEnvironment` (`src/lib/importers.ts`) now returns
 `{ environment, warning }`, setting `warning` when `_postman_variable_scope === 'globals'`.

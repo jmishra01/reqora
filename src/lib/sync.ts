@@ -10,7 +10,7 @@ import {
   type GitHubConfig
 } from './github';
 
-const SNAPSHOT_KEY = 'postcall.sync.snapshots';
+const SNAPSHOT_KEY = 'reqora.sync.snapshots';
 
 type SnapshotMap = Record<string, string>;
 

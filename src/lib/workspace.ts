@@ -1,5 +1,5 @@
 import { blankFormRow, blankRequest, blankRow, uid } from './types';
-import type { ApiRequest, Collection, FormDataRow, Journey, PostcallWorkspace, WorkspaceState, WorkspaceStore } from './types';
+import type { ApiRequest, Collection, FormDataRow, Journey, ReqoraWorkspace, WorkspaceState, WorkspaceStore } from './types';
 
 export const starterRequest = (): ApiRequest => ({
   id: uid(),
@@ -7,7 +7,7 @@ export const starterRequest = (): ApiRequest => ({
   method: 'GET',
   url: 'https://httpbin.org/anything',
   params: [
-    { id: uid(), key: 'source', value: 'postcall', enabled: true },
+    { id: uid(), key: 'source', value: 'reqora', enabled: true },
     blankRow()
   ],
   pathParams: [blankRow()],
@@ -27,14 +27,14 @@ export const starterRequest = (): ApiRequest => ({
   validateCertificates: true
 });
 
-export const initialWorkspace = (): PostcallWorkspace => ({
+export const initialWorkspace = (): ReqoraWorkspace => ({
   id: uid(),
   name: 'My Workspace',
   collections: [
     {
       id: uid(),
-      name: 'Postcall examples',
-      description: 'A starter collection to explore Postcall.',
+      name: 'Reqora examples',
+      description: 'A starter collection to explore Reqora.',
       expanded: true,
       variables: [blankRow()],
       auth: { type: 'none' },
@@ -57,7 +57,7 @@ export const initialWorkspace = (): PostcallWorkspace => ({
   journeys: []
 });
 
-export const blankWorkspace = (name: string): PostcallWorkspace => ({
+export const blankWorkspace = (name: string): ReqoraWorkspace => ({
   id: uid(),
   name,
   collections: [],
@@ -72,8 +72,8 @@ export const initialWorkspaceStore = (): WorkspaceStore => {
   return { activeWorkspaceId: workspace.id, workspaces: [workspace] };
 };
 
-export function normalizeWorkspace(value: WorkspaceState, fallbackName = 'My Workspace'): PostcallWorkspace {
-  const stored = value as Partial<PostcallWorkspace>;
+export function normalizeWorkspace(value: WorkspaceState, fallbackName = 'My Workspace'): ReqoraWorkspace {
+  const stored = value as Partial<ReqoraWorkspace>;
   return {
     id: stored.id ?? uid(),
     name: stored.name?.trim() || fallbackName,

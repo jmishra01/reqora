@@ -1,4 +1,4 @@
-# Postcall installation and development
+# Reqora installation and development
 
 ## Install a released version
 
@@ -15,18 +15,18 @@ Download the `.dmg` matching your Mac:
 - `aarch64` for Apple Silicon Macs
 - `x86_64` for Intel Macs
 
-Open the disk image and drag Postcall into Applications.
+Open the disk image and drag Reqora into Applications.
 
-Release packages are **not** signed with an Apple Developer ID certificate or notarized, so Gatekeeper will block the first launch with a message such as "Postcall is damaged and can't be opened" or "cannot be opened because the developer cannot be verified". To run it anyway:
+Release packages are **not** signed with an Apple Developer ID certificate or notarized, so Gatekeeper will block the first launch with a message such as "Reqora is damaged and can't be opened" or "cannot be opened because the developer cannot be verified". To run it anyway:
 
-1. Try to open Postcall from Applications (it will be blocked).
-2. Open **System Settings > Privacy & Security**, scroll to the Security section, and click **Open Anyway** next to the message about Postcall.
+1. Try to open Reqora from Applications (it will be blocked).
+2. Open **System Settings > Privacy & Security**, scroll to the Security section, and click **Open Anyway** next to the message about Reqora.
 3. Confirm **Open** in the dialog that appears.
 
 Alternatively, remove the quarantine attribute from Terminal before the first launch:
 
 ```bash
-xattr -cr /Applications/Postcall.app
+xattr -cr /Applications/Reqora.app
 ```
 
 ### Linux
@@ -34,13 +34,13 @@ xattr -cr /Applications/Postcall.app
 Use the x64 `.deb` package on Debian and Ubuntu-based distributions, or the `.AppImage` package on other supported distributions. Make an AppImage executable before launching it:
 
 ```bash
-chmod +x Postcall*.AppImage
-./Postcall*.AppImage
+chmod +x Reqora*.AppImage
+./Reqora*.AppImage
 ```
 
 ## Technology
 
-Postcall uses:
+Reqora uses:
 
 - Rust and `reqwest` for native HTTP execution
 - Tauri 2 for the cross-platform desktop application

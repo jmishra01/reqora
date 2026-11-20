@@ -95,7 +95,7 @@ async fn execute_http(input: RequestInput) -> Result<ResponseData, String> {
         .redirect(redirect_policy)
         .danger_accept_invalid_certs(!input.validate_certificates)
         .timeout(std::time::Duration::from_millis(input.timeout_ms))
-        .user_agent(format!("Postcall/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("Reqora/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|error| format!("Could not initialize HTTP client: {error}"))?;
 
@@ -247,13 +247,13 @@ fn save_workspace(workspace: Value, state: State<'_, AppState>) -> Result<(), St
 fn get_storage_path(app: tauri::AppHandle) -> Result<String, String> {
     app.path()
         .app_data_dir()
-        .map(|path| path.join("postcall.sqlite3").display().to_string())
+        .map(|path| path.join("reqora.sqlite3").display().to_string())
         .map_err(|error| format!("Could not resolve the storage path: {error}"))
 }
 
 #[tauri::command]
 fn open_storage_location(app: tauri::AppHandle) -> Result<(), String> {
-    let file = app.path().app_data_dir().map_err(|error| error.to_string())?.join("postcall.sqlite3");
+    let file = app.path().app_data_dir().map_err(|error| error.to_string())?.join("reqora.sqlite3");
     #[cfg(target_os = "macos")]
     let status = Command::new("open").arg("-R").arg(&file).status();
     #[cfg(target_os = "windows")]
@@ -271,7 +271,7 @@ struct ProcessMetrics { memory_bytes: u64, cpu_percent: f32, storage_bytes: u64 
 #[tauri::command]
 fn get_process_metrics(app: tauri::AppHandle) -> Result<ProcessMetrics, String> {
     let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
-    let storage_bytes = ["postcall.sqlite3", "postcall.sqlite3-wal", "postcall.sqlite3-shm"]
+    let storage_bytes = ["reqora.sqlite3", "reqora.sqlite3-wal", "reqora.sqlite3-shm"]
         .iter().filter_map(|name| fs::metadata(data_dir.join(name)).ok()).map(|metadata| metadata.len()).sum();
     #[cfg(unix)] {
         let output = Command::new("ps").args(["-o", "rss=,%cpu=", "-p", &std::process::id().to_string()]).output().map_err(|error| format!("Could not read process metrics: {error}"))?;
@@ -288,7 +288,7 @@ fn get_process_metrics(app: tauri::AppHandle) -> Result<ProcessMetrics, String> 
 fn open_database(app: &tauri::App) -> Result<Connection, Box<dyn std::error::Error>> {
     let app_data_dir = app.path().app_data_dir()?;
     fs::create_dir_all(&app_data_dir)?;
-    let database = Connection::open(app_data_dir.join("postcall.sqlite3"))?;
+    let database = Connection::open(app_data_dir.join("reqora.sqlite3"))?;
     database.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA foreign_keys = ON;
@@ -327,7 +327,7 @@ pub fn run() {
             github::github_push
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Postcall");
+        .expect("error while running Reqora");
 }
 
 #[cfg(test)]
@@ -337,10 +337,10 @@ mod tests {
     #[test]
     fn response_headers_are_serialized() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-postcall", "ready".parse().unwrap());
+        headers.insert("x-reqora", "ready".parse().unwrap());
         let result = serialize_headers(&headers);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].key, "x-postcall");
+        assert_eq!(result[0].key, "x-reqora");
         assert_eq!(result[0].value, "ready");
     }
 }

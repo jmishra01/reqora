@@ -116,26 +116,54 @@ export type HistoryEntry = {
   requestError?: string;
 };
 
-export type JourneyExtractionSource = 'json' | 'header' | 'body' | 'status';
+export type FlowExtractionSource = 'json' | 'header' | 'body' | 'status';
 
-export type JourneyExtraction = {
+export type FlowExtraction = {
   id: string;
   name: string;
-  source: JourneyExtractionSource;
+  source: FlowExtractionSource;
   path: string;
   template: string;
 };
 
-export type JourneyStep = {
+export type FlowNodeKind = 'start' | 'request' | 'condition' | 'delay' | 'setVariable' | 'log' | 'end';
+
+export type FlowConditionOperator = 'equals' | 'notEquals' | 'contains' | 'greaterThan' | 'lessThan' | 'exists';
+
+export type FlowNode = {
   id: string;
-  requestId: string;
-  extractions: JourneyExtraction[];
+  kind: FlowNodeKind;
+  position: { x: number; y: number };
+  // kind === 'request'
+  requestId?: string;
+  extractions?: FlowExtraction[];
+  // kind === 'condition'
+  conditionLeft?: string;
+  conditionOperator?: FlowConditionOperator;
+  conditionRight?: string;
+  // kind === 'delay'
+  delayMs?: number;
+  // kind === 'setVariable'
+  variableName?: string;
+  variableValue?: string;
+  // kind === 'log'
+  logTemplate?: string;
 };
 
-export type Journey = {
+export type FlowEdgePort = 'out' | 'true' | 'false';
+
+export type FlowEdge = {
+  id: string;
+  fromNodeId: string;
+  fromPort: FlowEdgePort;
+  toNodeId: string;
+};
+
+export type Flow = {
   id: string;
   name: string;
-  steps: JourneyStep[];
+  nodes: FlowNode[];
+  edges: FlowEdge[];
   stopOnError: boolean;
 };
 
@@ -144,7 +172,7 @@ export type WorkspaceState = {
   environments: Environment[];
   activeEnvironmentId: string | null;
   history: HistoryEntry[];
-  journeys: Journey[];
+  flows: Flow[];
 };
 
 export type ReqoraWorkspace = WorkspaceState & {
@@ -209,3 +237,20 @@ export const blankRequest = (name = 'Untitled Request'): ApiRequest => ({
   followRedirects: true,
   validateCertificates: true
 });
+
+export const blankFlowExtraction = (): FlowExtraction => ({ id: uid(), name: '', source: 'json', path: '', template: '{{value}}' });
+
+export const blankFlow = (name = 'Untitled flow'): Flow => {
+  const startId = uid();
+  const endId = uid();
+  return {
+    id: uid(),
+    name,
+    stopOnError: true,
+    nodes: [
+      { id: startId, kind: 'start', position: { x: 60, y: 160 } },
+      { id: endId, kind: 'end', position: { x: 60, y: 360 } }
+    ],
+    edges: []
+  };
+};

@@ -1,5 +1,36 @@
 import { blankFormRow, blankRequest, blankRow, uid } from './types';
-import type { ApiRequest, Collection, FormDataRow, Journey, ReqoraWorkspace, WorkspaceState, WorkspaceStore } from './types';
+import type { ApiRequest, Collection, Flow, FlowNode, FormDataRow, ReqoraWorkspace, WorkspaceState, WorkspaceStore } from './types';
+
+type LegacyJourneyExtraction = { id?: string; name?: string; source?: 'json' | 'header' | 'body' | 'status'; path?: string; template?: string };
+type LegacyJourneyStep = { id?: string; requestId?: string; extractions?: LegacyJourneyExtraction[] };
+type LegacyJourney = { id?: string; name?: string; stopOnError?: boolean; steps?: LegacyJourneyStep[] };
+
+function journeyToFlow(journey: LegacyJourney): Flow {
+  const startId = uid();
+  const endId = uid();
+  const requestNodes: FlowNode[] = (journey.steps ?? []).map((step, index) => ({
+    id: step.id ?? uid(),
+    kind: 'request',
+    position: { x: 60, y: 160 + (index + 1) * 160 },
+    requestId: step.requestId ?? '',
+    extractions: (step.extractions ?? []).map((extraction) => ({
+      id: extraction.id ?? uid(),
+      name: extraction.name ?? '',
+      source: extraction.source ?? 'json',
+      path: extraction.path ?? '',
+      template: extraction.template ?? '{{value}}'
+    }))
+  }));
+  const chain = [{ id: startId, kind: 'start' as const, position: { x: 60, y: 160 } }, ...requestNodes, { id: endId, kind: 'end' as const, position: { x: 60, y: 160 + (requestNodes.length + 1) * 160 } }];
+  const edges = chain.slice(0, -1).map((node, index) => ({ id: uid(), fromNodeId: node.id, fromPort: 'out' as const, toNodeId: chain[index + 1].id }));
+  return {
+    id: journey.id ?? uid(),
+    name: journey.name?.trim() || 'Untitled flow',
+    stopOnError: journey.stopOnError ?? true,
+    nodes: chain,
+    edges
+  };
+}
 
 export const starterRequest = (): ApiRequest => ({
   id: uid(),
@@ -54,7 +85,7 @@ export const initialWorkspace = (): ReqoraWorkspace => ({
   ],
   activeEnvironmentId: null,
   history: [],
-  journeys: []
+  flows: []
 });
 
 export const blankWorkspace = (name: string): ReqoraWorkspace => ({
@@ -64,7 +95,7 @@ export const blankWorkspace = (name: string): ReqoraWorkspace => ({
   environments: [],
   activeEnvironmentId: null,
   history: [],
-  journeys: []
+  flows: []
 });
 
 export const initialWorkspaceStore = (): WorkspaceStore => {
@@ -73,7 +104,16 @@ export const initialWorkspaceStore = (): WorkspaceStore => {
 };
 
 export function normalizeWorkspace(value: WorkspaceState, fallbackName = 'My Workspace'): ReqoraWorkspace {
-  const stored = value as Partial<ReqoraWorkspace>;
+  const stored = value as Partial<ReqoraWorkspace> & { journeys?: LegacyJourney[] };
+  const flows: Flow[] = Array.isArray(stored.flows) && stored.flows.length
+    ? stored.flows.map((flow) => ({
+        id: flow.id ?? uid(),
+        name: flow.name?.trim() || 'Untitled flow',
+        stopOnError: flow.stopOnError ?? true,
+        nodes: flow.nodes ?? [],
+        edges: flow.edges ?? []
+      }))
+    : (stored.journeys ?? []).map(journeyToFlow);
   return {
     id: stored.id ?? uid(),
     name: stored.name?.trim() || fallbackName,
@@ -81,22 +121,7 @@ export function normalizeWorkspace(value: WorkspaceState, fallbackName = 'My Wor
     environments: value.environments ?? [],
     activeEnvironmentId: value.activeEnvironmentId ?? null,
     history: (value.history ?? []).slice(0, 200),
-    journeys: ((stored.journeys ?? []) as Journey[]).map((journey) => ({
-      id: journey.id ?? uid(),
-      name: journey.name?.trim() || 'Untitled journey',
-      stopOnError: journey.stopOnError ?? true,
-      steps: (journey.steps ?? []).map((step) => ({
-        id: step.id ?? uid(),
-        requestId: step.requestId ?? '',
-        extractions: (step.extractions ?? []).map((extraction) => ({
-          id: extraction.id ?? uid(),
-          name: extraction.name ?? '',
-          source: extraction.source ?? 'json',
-          path: extraction.path ?? '',
-          template: extraction.template ?? '{{value}}'
-        }))
-      }))
-    }))
+    flows
   };
 }
 

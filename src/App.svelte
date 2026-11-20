@@ -3,13 +3,14 @@
   import {
     Activity, AlertTriangle, Braces, Check, Cloud, CodeXml as Code2, Command, Download, Eye, FileUp,
     Earth as Globe2, Github, CircleQuestionMark as HelpCircle, Layers3, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Search, Settings2,
-    Sparkles, Sun, X, Route, Trash2, ChevronUp, ChevronDown
+    Sparkles, Sun, X, Trash2, Workflow
   } from '@lucide/svelte';
   import Sidebar from './components/Sidebar.svelte';
   import KeyValueEditor from './components/KeyValueEditor.svelte';
   import FormDataEditor from './components/FormDataEditor.svelte';
   import CodeEditor from './components/CodeEditor.svelte';
   import ResponseViewer from './components/ResponseViewer.svelte';
+  import FlowCanvas from './components/FlowCanvas.svelte';
   import ReqoraIcon from './components/reqora.svelte';
   import SyncSettings from './components/SyncSettings.svelte';
   import { executeRequest, getProcessMetrics, loadBrowserWorkspace, loadWorkspace, openStorageLocation, saveWorkspace } from './lib/bridge';
@@ -18,8 +19,10 @@
   import { codeLanguageOptions, generateRequestCode } from './lib/codegen';
   import type { CodeLanguage } from './lib/codegen';
   import { blankWorkspace, initialWorkspaceStore, normalizeRequest, normalizeWorkspaceStore } from './lib/workspace';
-  import { blankRequest, blankRow, uid } from './lib/types';
-  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, Journey, JourneyExtraction, KeyValue, ReqoraWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
+  import { blankFlow, blankRequest, blankRow, uid } from './lib/types';
+  import type { ApiRequest, Collection, CollectionFolder, Environment, Flow, FlowExtraction, FlowNode, HistoryEntry, KeyValue, ReqoraWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
+  import type { FlowNodeHandlers, FlowNodeResult } from './lib/flowRunner';
+  import { runFlow } from './lib/flowRunner';
   import { getLinkedRepository, type SyncConflict, type SyncError } from './lib/sync';
   import { runPreRequestScript, type ScriptConsoleEntry } from './lib/scripting';
 
@@ -40,15 +43,6 @@
   };
   type LoadSample = { index: number; elapsedMs: number; status?: number; sizeBytes: number; error?: string; timeout: boolean; networkError: boolean; timings?: ResponseData['timings']; finishedAtMs: number };
   type LoadSnapshot = { rps: number; average: number; p95: number; errorRate: number; completed: number; elapsedMs: number };
-  type JourneyStepResult = {
-    stepId: string;
-    requestName: string;
-    state: 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
-    response?: ResponseData;
-    error?: string;
-    extracted: Record<string, string>;
-  };
-
   const defaultWorkspaceStore = initialWorkspaceStore();
   let workspaces: ReqoraWorkspace[] = defaultWorkspaceStore.workspaces;
   let activeWorkspaceId = defaultWorkspaceStore.activeWorkspaceId;
@@ -126,13 +120,11 @@
   let loadTestMinRps = 1;
   let loadTestMaxErrorRate = 1;
   let loadTestRequestId: string | null = null;
-  let journeyOpen = false;
-  let journeyEditor: Journey | null = null;
-  let journeyRunning = false;
-  let journeyResults: JourneyStepResult[] = [];
-  let journeyRunVariables: Record<string, string> = {};
-  let journeyPreview: Record<string, { status?: number; elapsedMs?: number; body?: string; error?: string }> = {};
-  let journeyPreviewLoading: Record<string, boolean> = {};
+  let flowOpen = false;
+  let flowEditor: Flow | null = null;
+  let flowRunning = false;
+  let flowResults: Record<string, FlowNodeResult> = {};
+  let flowRunVariables: Record<string, string> = {};
 
   $: activeRequest = openRequests.find((request) => request.id === activeRequestId) ?? openRequests[0];
   $: activeEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
@@ -810,7 +802,7 @@
     if (scope) apply(scope.collection.variables, `Collection · ${scope.collection.name}`);
     if (scope?.folder) apply(scope.folder.variables, `Folder · ${scope.folder.name}`);
     if (activeEnvironment) apply(activeEnvironment.variables, `Environment · ${activeEnvironment.name}`);
-    Object.entries(runtimeVariables).forEach(([key, value]) => variables.set(key, { key, value, source: 'Journey output' }));
+    Object.entries(runtimeVariables).forEach(([key, value]) => variables.set(key, { key, value, source: 'Flow output' }));
     return [...variables.values()];
   }
 
@@ -1078,144 +1070,61 @@
     }
   }
 
-  function blankJourneyExtraction(): JourneyExtraction {
-    return { id: uid(), name: '', source: 'json', path: '', template: '{{value}}' };
+  function newFlow(): Flow {
+    return blankFlow(`Flow ${workspace.flows.length + 1}`);
   }
 
-  function blankJourney(): Journey {
-    return {
-      id: uid(),
-      name: `Journey ${workspace.journeys.length + 1}`,
-      stopOnError: true,
-      steps: savedRequests[0] ? [{ id: uid(), requestId: savedRequests[0].request.id, extractions: [] }] : []
-    };
+  function openFlows() {
+    flowEditor = structuredClone(workspace.flows[0] ?? newFlow());
+    flowResults = {};
+    flowRunVariables = {};
+    flowOpen = true;
   }
 
-  function openJourneys() {
-    journeyEditor = structuredClone(workspace.journeys[0] ?? blankJourney());
-    journeyResults = [];
-    journeyRunVariables = {};
-    journeyPreview = {};
-    journeyPreviewLoading = {};
-    journeyOpen = true;
+  function editFlow(id: string) {
+    const flow = workspace.flows.find((item) => item.id === id);
+    if (!flow || flowRunning) return;
+    flowEditor = structuredClone(flow);
+    flowResults = {};
+    flowRunVariables = {};
   }
 
-  function editJourney(id: string) {
-    const journey = workspace.journeys.find((item) => item.id === id);
-    if (!journey || journeyRunning) return;
-    journeyEditor = structuredClone(journey);
-    journeyResults = [];
-    journeyRunVariables = {};
-    journeyPreview = {};
-    journeyPreviewLoading = {};
+  function createFlow() {
+    if (flowRunning) return;
+    flowEditor = newFlow();
+    flowResults = {};
+    flowRunVariables = {};
   }
 
-  function createJourney() {
-    if (journeyRunning) return;
-    journeyEditor = blankJourney();
-    journeyResults = [];
-    journeyRunVariables = {};
-    journeyPreview = {};
-    journeyPreviewLoading = {};
-  }
-
-  function saveJourney(showConfirmation = true) {
-    if (!journeyEditor) return false;
-    journeyEditor.name = journeyEditor.name.trim() || 'Untitled journey';
-    const savedJourney = structuredClone(journeyEditor);
-    const index = workspace.journeys.findIndex((item) => item.id === savedJourney.id);
-    if (index === -1) workspace.journeys.push(savedJourney);
-    else workspace.journeys[index] = savedJourney;
+  function saveFlow(showConfirmation = true) {
+    if (!flowEditor) return false;
+    flowEditor.name = flowEditor.name.trim() || 'Untitled flow';
+    const savedFlow = structuredClone(flowEditor);
+    const index = workspace.flows.findIndex((item) => item.id === savedFlow.id);
+    if (index === -1) workspace.flows.push(savedFlow);
+    else workspace.flows[index] = savedFlow;
     commitWorkspace();
-    if (showConfirmation) showToast('Journey saved locally');
+    if (showConfirmation) showToast('Flow saved locally');
     return true;
   }
 
-  function deleteJourney() {
-    if (!journeyEditor || journeyRunning) return;
-    const existing = workspace.journeys.find((item) => item.id === journeyEditor?.id);
+  function deleteFlow() {
+    if (!flowEditor || flowRunning) return;
+    const existing = workspace.flows.find((item) => item.id === flowEditor?.id);
     if (existing && !window.confirm(`Delete “${existing.name}”?`)) return;
-    workspace.journeys = workspace.journeys.filter((item) => item.id !== journeyEditor?.id);
+    workspace.flows = workspace.flows.filter((item) => item.id !== flowEditor?.id);
     commitWorkspace();
-    journeyEditor = structuredClone(workspace.journeys[0] ?? blankJourney());
-    journeyResults = [];
-    journeyRunVariables = {};
-    journeyPreview = {};
-    journeyPreviewLoading = {};
+    flowEditor = structuredClone(workspace.flows[0] ?? newFlow());
+    flowResults = {};
+    flowRunVariables = {};
   }
 
-  function addJourneyStep() {
-    if (!journeyEditor || !savedRequests.length) return;
-    journeyEditor.steps = [...journeyEditor.steps, { id: uid(), requestId: savedRequests[0].request.id, extractions: [] }];
-    journeyEditor = { ...journeyEditor };
-  }
-
-  function removeJourneyStep(stepId: string) {
-    if (!journeyEditor) return;
-    journeyEditor.steps = journeyEditor.steps.filter((step) => step.id !== stepId);
-    journeyEditor = { ...journeyEditor };
-    journeyResults = journeyResults.filter((result) => result.stepId !== stepId);
-    clearJourneyPreview(stepId);
-  }
-
-  function moveJourneyStep(index: number, direction: -1 | 1) {
-    if (!journeyEditor) return;
-    const target = index + direction;
-    if (target < 0 || target >= journeyEditor.steps.length) return;
-    const steps = [...journeyEditor.steps];
-    [steps[index], steps[target]] = [steps[target], steps[index]];
-    journeyEditor.steps = steps;
-    journeyEditor = { ...journeyEditor };
-  }
-
-  function addJourneyExtraction(stepId: string) {
-    if (!journeyEditor) return;
-    const step = journeyEditor.steps.find((item) => item.id === stepId);
-    if (!step) return;
-    step.extractions = [...step.extractions, blankJourneyExtraction()];
-    journeyEditor = { ...journeyEditor };
-  }
-
-  function removeJourneyExtraction(stepId: string, extractionId: string) {
-    if (!journeyEditor) return;
-    const step = journeyEditor.steps.find((item) => item.id === stepId);
-    if (!step) return;
-    step.extractions = step.extractions.filter((item) => item.id !== extractionId);
-    journeyEditor = { ...journeyEditor };
+  function onFlowChange() {
+    flowEditor = flowEditor;
   }
 
   function savedRequestById(id: string) {
     return savedRequests.find((item) => item.request.id === id)?.request;
-  }
-
-  async function previewJourneyStep(stepId: string) {
-    if (!journeyEditor || journeyPreviewLoading[stepId]) return;
-    const step = journeyEditor.steps.find((item) => item.id === stepId);
-    const request = step ? savedRequestById(step.requestId) : undefined;
-    if (!request) return;
-    journeyPreviewLoading = { ...journeyPreviewLoading, [stepId]: true };
-    try {
-      const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(request, journeyRunVariables);
-      const { input, inferredProtocol } = buildRequestInput(effectiveRequest, runtimeVariables);
-      const stepResponse = await executeResolvedRequest(input, inferredProtocol);
-      journeyPreview = { ...journeyPreview, [stepId]: { status: stepResponse.status, elapsedMs: stepResponse.elapsedMs, body: stepResponse.body } };
-    } catch (error) {
-      journeyPreview = { ...journeyPreview, [stepId]: { error: error instanceof Error ? error.message : String(error) } };
-    } finally {
-      journeyPreviewLoading = { ...journeyPreviewLoading, [stepId]: false };
-    }
-  }
-
-  function clearJourneyPreview(stepId: string) {
-    if (!(stepId in journeyPreview)) return;
-    const next = { ...journeyPreview };
-    delete next[stepId];
-    journeyPreview = next;
-  }
-
-  function formatPreviewBody(body?: string) {
-    if (!body) return '';
-    try { return JSON.stringify(JSON.parse(body), null, 2); } catch { return body; }
   }
 
   function readJsonPath(value: unknown, path: string) {
@@ -1236,7 +1145,7 @@
     return current;
   }
 
-  function extractionValue(responseData: ResponseData, extraction: JourneyExtraction) {
+  function extractionValue(responseData: ResponseData, extraction: FlowExtraction) {
     let raw: unknown;
     if (extraction.source === 'json') {
       let parsed: unknown;
@@ -1253,63 +1162,75 @@
     return (extraction.template || '{{value}}').replaceAll('{{value}}', value ?? '');
   }
 
-  function updateJourneyResult(stepId: string, patch: Partial<JourneyStepResult>) {
-    journeyResults = journeyResults.map((result) => result.stepId === stepId ? { ...result, ...patch } : result);
+  function evaluateFlowCondition(node: FlowNode, vars: Record<string, string>) {
+    const left = resolveVariablesInTemplate(node.conditionLeft ?? '', vars);
+    if (node.conditionOperator === 'exists') return left.trim().length > 0;
+    const right = resolveVariablesInTemplate(node.conditionRight ?? '', vars);
+    switch (node.conditionOperator) {
+      case 'notEquals': return left !== right;
+      case 'contains': return left.includes(right);
+      case 'greaterThan': return Number(left) > Number(right);
+      case 'lessThan': return Number(left) < Number(right);
+      default: return left === right;
+    }
   }
 
-  async function runJourney() {
-    if (!journeyEditor || journeyRunning || !journeyEditor.steps.length) return;
-    const invalidStep = journeyEditor.steps.find((step) => !savedRequestById(step.requestId));
-    if (invalidStep) { showToast('Choose a saved request for every step'); return; }
-    const invalidExtraction = journeyEditor.steps.flatMap((step) => step.extractions).find((item) => !item.name.trim() || (item.source === 'header' && !item.path.trim()));
+  function resolveVariablesInTemplate(input: string, vars: Record<string, string>) {
+    let output = input;
+    for (let pass = 0; pass < 5; pass += 1) {
+      const next = output.replace(/\{\{\s*([^}\s]+)\s*\}\}/g, (match, key: string) => vars[key] ?? match);
+      if (next === output) break;
+      output = next;
+    }
+    return output;
+  }
+
+  async function runCurrentFlow() {
+    if (!flowEditor || flowRunning) return;
+    const flowToRun = flowEditor;
+    const requestNodes = flowToRun.nodes.filter((node) => node.kind === 'request');
+    const invalidRequestNode = requestNodes.find((node) => !savedRequestById(node.requestId ?? ''));
+    if (invalidRequestNode) { showToast('Choose a saved request for every request node'); return; }
+    const invalidExtraction = requestNodes.flatMap((node) => node.extractions ?? []).find((item) => !item.name.trim() || (item.source === 'header' && !item.path.trim()));
     if (invalidExtraction) { showToast('Every output needs a variable name and every header output needs a header name'); return; }
-    saveJourney(false);
-    journeyRunning = true;
-    journeyRunVariables = {};
-    journeyResults = journeyEditor.steps.map((step) => ({
-      stepId: step.id,
-      requestName: savedRequestById(step.requestId)?.name ?? 'Missing request',
-      state: 'pending',
-      extracted: {}
-    }));
+    saveFlow(false);
+    flowRunning = true;
+    flowResults = {};
+    flowRunVariables = {};
     const historyEntries: HistoryEntry[] = [];
-    let stopped = false;
-    for (const step of journeyEditor.steps) {
-      if (stopped) { updateJourneyResult(step.id, { state: 'skipped' }); continue; }
-      const request = savedRequestById(step.requestId)!;
-      updateJourneyResult(step.id, { state: 'running' });
-      try {
-        const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(request, journeyRunVariables);
-        journeyRunVariables = runtimeVariables;
-        const { input, inferredProtocol } = buildRequestInput(effectiveRequest, journeyRunVariables);
+    const handlers: FlowNodeHandlers = {
+      request: async (node, vars) => {
+        const request = savedRequestById(node.requestId ?? '')!;
+        const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(request, vars);
+        const { input, inferredProtocol } = buildRequestInput(effectiveRequest, runtimeVariables);
         const stepResponse = await executeResolvedRequest(input, inferredProtocol);
+        let nextVars = runtimeVariables;
         const extracted: Record<string, string> = {};
-        for (const extraction of step.extractions) {
+        for (const extraction of node.extractions ?? []) {
           const name = extraction.name.trim();
           extracted[name] = extractionValue(stepResponse, extraction);
-          journeyRunVariables = { ...journeyRunVariables, [name]: extracted[name] };
+          nextVars = { ...nextVars, [name]: extracted[name] };
         }
         const succeeded = stepResponse.status < 400;
-        updateJourneyResult(step.id, {
-          state: succeeded ? 'passed' : 'failed',
-          response: stepResponse,
-          error: succeeded ? undefined : `HTTP ${stepResponse.status} ${stepResponse.statusText}`,
-          extracted
-        });
         historyEntries.push({ id: uid(), request: structuredClone(request), status: stepResponse.status, elapsedMs: stepResponse.elapsedMs, createdAt: new Date().toISOString(), response: truncateResponseForHistory(stepResponse) });
-        if (!succeeded && journeyEditor.stopOnError) stopped = true;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        updateJourneyResult(step.id, { state: 'failed', error: message });
-        historyEntries.push({ id: uid(), request: structuredClone(request), createdAt: new Date().toISOString(), requestError: message });
-        if (journeyEditor.stopOnError) stopped = true;
+        return { vars: nextVars, extracted, succeeded, error: succeeded ? undefined : `HTTP ${stepResponse.status} ${stepResponse.statusText}`, historyEntry: historyEntries.at(-1) };
+      },
+      condition: (node, vars) => evaluateFlowCondition(node, vars),
+      delay: (node) => new Promise((resolve) => setTimeout(resolve, Math.max(0, node.delayMs ?? 0))),
+      setVariable: (node, vars) => {
+        const name = (node.variableName ?? '').trim() || 'variable';
+        return { ...vars, [name]: resolveVariablesInTemplate(node.variableValue ?? '', vars) };
+      },
+      log: (node, vars) => {
+        console.info(`[Flow] ${resolveVariablesInTemplate(node.logTemplate ?? '{{value}}', vars)}`);
       }
-    }
+    };
+    flowRunVariables = await runFlow(flowToRun, handlers, (result) => { flowResults = { ...flowResults, [result.nodeId]: result }; }, flowToRun.stopOnError);
     if (historyEntries.length) {
       workspace.history = [...historyEntries.reverse(), ...workspace.history].slice(0, 200);
       commitWorkspace();
     }
-    journeyRunning = false;
+    flowRunning = false;
   }
 
   function percentile(values: number[], fraction: number) {
@@ -1722,7 +1643,7 @@
               <span class="unsaved-state">{unsavedTabs[activeRequestId] ? 'Unsaved changes' : 'Saved'}</span>
             </div>
             <div class="request-actions">
-              <button class="secondary-button" on:click={openJourneys} disabled={!savedRequests.length}><Route size={15} /> Journeys</button>
+              <button class="secondary-button" on:click={openFlows}><Workflow size={15} /> Flows</button>
               <button class="secondary-button" on:click={openLoadTest} disabled={!activeRequest.url.trim()}><Activity size={15} /> Load test</button>
               <button class="secondary-button" on:click={saveActiveRequest}><Save size={15} /> Save</button>
               <button class="icon-button bordered" on:click={() => utilityModal = 'code'} title="Generate code"><Code2 size={16} /></button>
@@ -1915,95 +1836,40 @@
     <button class="icon-button subtle" on:click={() => utilityModal = 'settings'} title="Application settings"><Settings2 size={14} /></button>
   </footer>
 
-  {#if journeyOpen && journeyEditor}
-    <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget && !journeyRunning) journeyOpen = false; }}>
-      <div class="modal journey-modal" role="dialog" aria-modal="true" aria-label="API journeys">
+  {#if flowOpen && flowEditor}
+    <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget && !flowRunning) flowOpen = false; }}>
+      <div class="modal flow-modal" role="dialog" aria-modal="true" aria-label="Flows">
         <div class="modal-header">
-          <div><span class="modal-icon"><Route size={18} /></span><div><strong>API Journeys</strong><p>Chain saved requests and pass response values into the next steps.</p></div></div>
-          <button class="icon-button" disabled={journeyRunning} on:click={() => journeyOpen = false} aria-label="Close dialog"><X size={17} /></button>
+          <div><span class="modal-icon"><Workflow size={18} /></span><div><strong>Flows</strong><p>Chain saved requests with branching, delay, and variable nodes on a visual canvas.</p></div></div>
+          <button class="icon-button" disabled={flowRunning} on:click={() => flowOpen = false} aria-label="Close dialog"><X size={17} /></button>
         </div>
-        <div class="journey-layout">
-          <aside class="journey-sidebar">
-            <div class="journey-sidebar-heading"><span>Saved journeys</span><button on:click={createJourney} disabled={journeyRunning} title="New journey"><Plus size={14} /></button></div>
-            <div class="journey-saved-list">
-              {#each workspace.journeys as journey}
-                <button class:active={journey.id === journeyEditor.id} disabled={journeyRunning} on:click={() => editJourney(journey.id)}>
-                  <Route size={13} /><span><strong>{journey.name}</strong><small>{journey.steps.length} {journey.steps.length === 1 ? 'step' : 'steps'}</small></span>
+        <div class="flow-layout">
+          <aside class="flow-sidebar">
+            <div class="flow-sidebar-heading"><span>Saved flows</span><button on:click={createFlow} disabled={flowRunning} title="New flow"><Plus size={14} /></button></div>
+            <div class="flow-saved-list">
+              {#each workspace.flows as flow}
+                <button class:active={flow.id === flowEditor.id} disabled={flowRunning} on:click={() => editFlow(flow.id)}>
+                  <Workflow size={13} /><span><strong>{flow.name}</strong><small>{flow.nodes.length} {flow.nodes.length === 1 ? 'node' : 'nodes'}</small></span>
                 </button>
               {/each}
-              {#if !workspace.journeys.length}<p>No saved journeys yet.</p>{/if}
+              {#if !workspace.flows.length}<p>No saved flows yet.</p>{/if}
             </div>
           </aside>
-          <div class="journey-editor">
-            <fieldset class="journey-config-fields" disabled={journeyRunning}>
-              <div class="journey-name-row">
-                <label><span>Journey name</span><input bind:value={journeyEditor.name} placeholder="Sign up and create project" /></label>
-                <label class="journey-stop-option"><input type="checkbox" bind:checked={journeyEditor.stopOnError} /><span><strong>Stop on error</strong><small>Skip remaining steps after a failure</small></span></label>
-              </div>
-              <div class="journey-help">
-                <Sparkles size={15} />
-                <span>Extract an output from one response, then use it anywhere in later requests as <code>{'{{variableName}}'}</code>.</span>
-              </div>
-              <div class="journey-steps">
-                {#each journeyEditor.steps as step, index (step.id)}
-                  {@const result = journeyResults.find((item) => item.stepId === step.id)}
-                  {@const preview = journeyPreview[step.id] ?? (result?.response ? { status: result.response.status, elapsedMs: result.response.elapsedMs, body: result.response.body } : null)}
-                  <section class="journey-step" class:running={result?.state === 'running'} class:passed={result?.state === 'passed'} class:failed={result?.state === 'failed'} class:skipped={result?.state === 'skipped'}>
-                    <div class="journey-step-header">
-                      <span class="journey-step-number">{index + 1}</span>
-                      <div><strong>{savedRequestById(step.requestId)?.name ?? 'Choose a request'}</strong><small>{result ? result.state : 'Ready'}</small></div>
-                      <button class="journey-preview-trigger" on:click={() => previewJourneyStep(step.id)} disabled={journeyRunning || journeyPreviewLoading[step.id]} title="Send just this request to see an example response">
-                        {#if journeyPreviewLoading[step.id]}<RefreshCw size={13} class="spinning" />{:else}<Eye size={13} />{/if} Preview
-                      </button>
-                      <button on:click={() => moveJourneyStep(index, -1)} disabled={index === 0} title="Move step up"><ChevronUp size={14} /></button>
-                      <button on:click={() => moveJourneyStep(index, 1)} disabled={index === journeyEditor.steps.length - 1} title="Move step down"><ChevronDown size={14} /></button>
-                      <button class="journey-remove" on:click={() => removeJourneyStep(step.id)} title="Remove step"><Trash2 size={13} /></button>
-                    </div>
-                    <label class="journey-request-select"><span>Saved request</span><select bind:value={step.requestId}>{#each savedRequests as option}<option value={option.request.id}>{option.label}</option>{/each}</select></label>
-                    {#if preview}
-                      <div class="journey-preview">
-                        <div class="journey-preview-heading">
-                          <span>Example response{#if preview.status}<b>HTTP {preview.status}</b>{/if}{#if preview.elapsedMs}<small>{preview.elapsedMs} ms</small>{/if}</span>
-                          <button on:click={() => clearJourneyPreview(step.id)} title="Hide example response"><X size={12} /></button>
-                        </div>
-                        {#if preview.error}<p class="journey-preview-error">{preview.error}</p>{:else}<pre class="journey-preview-body">{formatPreviewBody(preview.body)}</pre>{/if}
-                      </div>
-                    {/if}
-                    <div class="journey-output-heading"><div><strong>Response outputs</strong><small>{#if preview}Pick a JSON path from the example response above.{:else}Available only to the steps below this one{/if}</small></div><button on:click={() => addJourneyExtraction(step.id)}><Plus size={12} /> Add output</button></div>
-                    {#each step.extractions as extraction (extraction.id)}
-                      <div class="journey-extraction">
-                        <input bind:value={extraction.name} placeholder="variableName" aria-label="Output variable name" />
-                        <select bind:value={extraction.source} aria-label="Output source">
-                          <option value="json">JSON path</option><option value="header">Header</option><option value="body">Full body</option><option value="status">Status code</option>
-                        </select>
-                        <input bind:value={extraction.path} disabled={extraction.source === 'body' || extraction.source === 'status'} placeholder={extraction.source === 'header' ? 'Header name' : '$.data.id'} aria-label="JSON path or header name" />
-                        <input bind:value={extraction.template} placeholder={'{{value}}'} title={'Optional template, for example user-{{value}}'} aria-label="Output value template" />
-                        <button on:click={() => removeJourneyExtraction(step.id, extraction.id)} title="Remove output"><X size={13} /></button>
-                      </div>
-                    {/each}
-                    {#if !step.extractions.length}<p class="journey-no-outputs">No outputs. Add one if a later request needs data from this response.</p>{/if}
-                    {#if result}
-                      <div class="journey-step-result">
-                        <div><span class="journey-result-state {result.state}">{result.state}</span>{#if result.response}<strong>HTTP {result.response.status}</strong><span>{result.response.elapsedMs} ms</span>{/if}</div>
-                        {#if result.error}<p>{result.error}</p>{/if}
-                        {#if Object.keys(result.extracted).length}<div class="journey-result-vars">{#each Object.entries(result.extracted) as [key, value]}<span><code>{key}</code><b>{value}</b></span>{/each}</div>{/if}
-                      </div>
-                    {/if}
-                  </section>
-                {/each}
-                {#if !journeyEditor.steps.length}<div class="journey-empty"><Route size={25} /><strong>Add the first request</strong><p>A journey runs saved requests one after another.</p></div>{/if}
-              </div>
-              <button class="journey-add-step" on:click={addJourneyStep} disabled={!savedRequests.length}><Plus size={14} /> Add request step</button>
-            </fieldset>
+          <div class="flow-editor-shell">
+            <div class="flow-name-row">
+              <label><span>Flow name</span><input bind:value={flowEditor.name} placeholder="Sign up and create project" disabled={flowRunning} /></label>
+              <label class="flow-stop-option"><input type="checkbox" bind:checked={flowEditor.stopOnError} disabled={flowRunning} /><span><strong>Stop on error</strong><small>Halt the flow after a failed node</small></span></label>
+            </div>
+            <FlowCanvas flow={flowEditor} {savedRequests} results={flowResults} runVariables={flowRunVariables} running={flowRunning} onChange={onFlowChange} />
           </div>
         </div>
-        <div class="modal-footer journey-footer">
-          <button class="journey-delete-button" on:click={deleteJourney} disabled={journeyRunning}><Trash2 size={13} /> Delete</button>
-          {#if Object.keys(journeyRunVariables).length}<span class="journey-variable-count">{Object.keys(journeyRunVariables).length} runtime {Object.keys(journeyRunVariables).length === 1 ? 'variable' : 'variables'}</span>{/if}
+        <div class="modal-footer flow-footer">
+          <button class="flow-delete-button" on:click={deleteFlow} disabled={flowRunning}><Trash2 size={13} /> Delete</button>
+          {#if Object.keys(flowRunVariables).length}<span class="flow-variable-count">{Object.keys(flowRunVariables).length} runtime {Object.keys(flowRunVariables).length === 1 ? 'variable' : 'variables'}</span>{/if}
           <div></div>
-          <button class="secondary-button" on:click={() => journeyOpen = false} disabled={journeyRunning}>Close</button>
-          <button class="secondary-button" on:click={() => saveJourney()} disabled={journeyRunning}>Save</button>
-          <button class="primary-button" on:click={runJourney} disabled={journeyRunning || !journeyEditor.steps.length}>{journeyRunning ? 'Running…' : 'Run journey'}</button>
+          <button class="secondary-button" on:click={() => flowOpen = false} disabled={flowRunning}>Close</button>
+          <button class="secondary-button" on:click={() => saveFlow()} disabled={flowRunning}>Save</button>
+          <button class="primary-button" on:click={runCurrentFlow} disabled={flowRunning}>{flowRunning ? 'Running…' : 'Run flow'}</button>
         </div>
       </div>
     </div>

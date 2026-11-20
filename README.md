@@ -11,7 +11,7 @@ Reqora is a fast, local-first desktop application for creating, organizing, send
 - Inspect response bodies, headers, status information, timing, and size using pretty or raw views.
 - Search response content, copy responses, and download response bodies.
 - Generate ready-to-run request code for cURL, JavaScript, Python, Go, Rust, C#, and PHP, or paste cURL text to create a request.
-- Import and export Postman Collection v2 and v2.1 JSON files.
+- Import and export collection JSON files (v2 and v2.1 format).
 - Build reusable API Journeys that run saved requests in sequence. Extract JSON paths, headers, response bodies, or status codes into runtime variables, optionally format them, and reference them in later steps with `{{variableName}}`.
 
 ## Organize your APIs

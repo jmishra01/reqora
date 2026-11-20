@@ -1,88 +1,94 @@
 export type ScriptHeader = { key: string; value: string };
+export type ScriptConsoleEntry = { level: 'log' | 'info' | 'warn' | 'error'; text: string };
+export type ScriptTestOutcome = { name: string; passed: boolean; error?: string };
 
-export type ScriptConsoleEntry = { level: 'log' | 'warn' | 'error'; message: string };
-
-export type ScriptContext = {
-  url: string;
-  method: string;
-  headers: ScriptHeader[];
-  variables: Record<string, string>;
+type SharedContext = {
   environment: Record<string, string>;
-  hasEnvironment: boolean;
-};
-
-export type ScriptResult = {
+  collectionVariables: Record<string, string>;
   variables: Record<string, string>;
-  environmentUpdates: Record<string, string>;
-  headers: ScriptHeader[];
-  console: ScriptConsoleEntry[];
-  error?: string;
+  requestName?: string;
 };
 
-const SCRIPT_TIMEOUT_MS = 5000;
+export type PreRequestContext = SharedContext & {
+  request: { method: string; url: string; headers: ScriptHeader[]; body: string };
+};
 
-function stringifyArg(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value instanceof Error) return value.message;
-  try { return JSON.stringify(value); } catch { return String(value); }
+export type TestContext = SharedContext & {
+  request: { method: string; url: string; headers: ScriptHeader[]; body: string };
+  response: { code: number; status: string; responseTime: number; responseSize: number; headers: ScriptHeader[]; body: string };
+};
+
+export type ScriptRunResult = {
+  ok: boolean;
+  error?: string;
+  request: { method: string; url: string; headers: ScriptHeader[]; body: string };
+  tests: ScriptTestOutcome[];
+  environmentSets: Record<string, string>;
+  environmentUnsets: string[];
+  collectionVariableSets: Record<string, string>;
+  collectionVariableUnsets: string[];
+  variableSets: Record<string, string>;
+  consoleLogs: ScriptConsoleEntry[];
+};
+
+const TIMEOUT_MS = 5000;
+
+let worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (!worker) worker = new Worker(new URL('./scriptSandbox.worker.ts', import.meta.url), { type: 'module' });
+  return worker;
 }
 
-export async function runPreRequestScript(script: string, context: ScriptContext): Promise<ScriptResult> {
-  const trimmed = script.trim();
-  const consoleEntries: ScriptConsoleEntry[] = [];
-  const variableUpdates: Record<string, string> = {};
-  const environmentUpdates: Record<string, string> = {};
-  if (!trimmed) return { variables: variableUpdates, environmentUpdates, headers: context.headers, console: consoleEntries };
+function resetWorker() {
+  worker?.terminate();
+  worker = null;
+}
 
-  const headers = context.headers.map((header) => ({ ...header }));
-  const log = (level: ScriptConsoleEntry['level']) => (...args: unknown[]) => {
-    consoleEntries.push({ level, message: args.map(stringifyArg).join(' ') });
+function emptyResult(request: PreRequestContext['request'], error?: string): ScriptRunResult {
+  return {
+    ok: !error,
+    error,
+    request,
+    tests: [],
+    environmentSets: {},
+    environmentUnsets: [],
+    collectionVariableSets: {},
+    collectionVariableUnsets: [],
+    variableSets: {},
+    consoleLogs: []
   };
+}
 
-  const pm = {
-    variables: {
-      get: (key: string) => variableUpdates[key] ?? context.variables[key] ?? context.environment[key],
-      set: (key: string, value: unknown) => { variableUpdates[key] = String(value); }
-    },
-    environment: {
-      get: (key: string) => environmentUpdates[key] ?? context.environment[key],
-      set: (key: string, value: unknown) => {
-        environmentUpdates[key] = String(value);
-        if (!context.hasEnvironment) {
-          consoleEntries.push({ level: 'warn', message: `pm.environment.set("${key}", ...) — no environment is active, value kept for this request only.` });
-        }
-      }
-    },
-    request: {
-      url: context.url,
-      method: context.method,
-      headers: {
-        get: (key: string) => headers.find((header) => header.key.toLowerCase() === key.toLowerCase())?.value,
-        add: (entry: ScriptHeader) => { if (entry?.key) headers.push({ key: entry.key, value: String(entry.value ?? '') }); },
-        upsert: (entry: ScriptHeader) => {
-          if (!entry?.key) return;
-          const index = headers.findIndex((header) => header.key.toLowerCase() === entry.key.toLowerCase());
-          const row = { key: entry.key, value: String(entry.value ?? '') };
-          if (index >= 0) headers[index] = row; else headers.push(row);
-        }
-      }
-    },
-    console: { log: log('log'), warn: log('warn'), error: log('error'), info: log('log') }
-  };
+function runInSandbox(kind: 'pre-request' | 'test', script: string, context: PreRequestContext | TestContext): Promise<ScriptRunResult> {
+  return new Promise((resolve) => {
+    const id = crypto.randomUUID();
+    const activeWorker = getWorker();
 
-  try {
-    // eslint-disable-next-line no-new-func
-    const runner = new Function('pm', 'console', `return (async () => {\n${script}\n})();`);
-    await Promise.race([
-      runner(pm, pm.console),
-      new Promise((_, reject) => window.setTimeout(() => reject(new Error(`Script timed out after ${SCRIPT_TIMEOUT_MS / 1000}s`)), SCRIPT_TIMEOUT_MS))
-    ]);
-  } catch (error) {
-    return {
-      variables: variableUpdates, environmentUpdates, headers: context.headers, console: consoleEntries,
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
+    const timer = window.setTimeout(() => {
+      activeWorker.removeEventListener('message', onMessage);
+      resetWorker();
+      resolve(emptyResult(context.request, `Script timed out after ${TIMEOUT_MS / 1000}s (possible infinite loop).`));
+    }, TIMEOUT_MS);
 
-  return { variables: variableUpdates, environmentUpdates, headers, console: consoleEntries };
+    function onMessage(event: MessageEvent<{ id: string; result: ScriptRunResult }>) {
+      if (event.data?.id !== id) return;
+      window.clearTimeout(timer);
+      activeWorker.removeEventListener('message', onMessage);
+      resolve(event.data.result);
+    }
+
+    activeWorker.addEventListener('message', onMessage);
+    activeWorker.postMessage({ id, kind, script, context });
+  });
+}
+
+export async function runPreRequestScript(script: string, context: PreRequestContext): Promise<ScriptRunResult> {
+  if (!script.trim()) return emptyResult(context.request);
+  return runInSandbox('pre-request', script, context);
+}
+
+export async function runTestScript(script: string, context: TestContext): Promise<ScriptRunResult> {
+  if (!script.trim()) return emptyResult(context.request);
+  return runInSandbox('test', script, context);
 }

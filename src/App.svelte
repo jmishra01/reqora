@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import {
-    Activity, AlertTriangle, Braces, Check, Cloud, CodeXml as Code2, Command, Download, Eye, FileUp,
+    Activity, AlertTriangle, Braces, Check, Cloud, CodeXml as Code2, Command, Copy, Download, Eye, FileUp,
     Earth as Globe2, Github, CircleQuestionMark as HelpCircle, Layers3, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Search, Settings2,
     Sparkles, Sun, X, Trash2, Workflow
   } from '@lucide/svelte';
@@ -13,9 +13,10 @@
   import FlowCanvas from './components/FlowCanvas.svelte';
   import ReqoraIcon from './components/reqora.svelte';
   import SyncSettings from './components/SyncSettings.svelte';
+  import CustomSelect from './components/CustomSelect.svelte';
   import { executeRequest, getProcessMetrics, loadBrowserWorkspace, loadWorkspace, openStorageLocation, saveWorkspace } from './lib/bridge';
   import type { ProcessMetrics } from './lib/bridge';
-  import { parseCurlCommand, parsePostmanCollection, parsePostmanEnvironment } from './lib/importers';
+  import { parseCurlCommand, parseCollectionFile, parsePostmanEnvironment } from './lib/importers';
   import { codeLanguageOptions, generateRequestCode } from './lib/codegen';
   import type { CodeLanguage } from './lib/codegen';
   import { blankWorkspace, initialWorkspaceStore, normalizeRequest, normalizeWorkspaceStore } from './lib/workspace';
@@ -24,7 +25,8 @@
   import type { FlowNodeHandlers, FlowNodeResult } from './lib/flowRunner';
   import { runFlow } from './lib/flowRunner';
   import { getLinkedRepository, type SyncConflict, type SyncError } from './lib/sync';
-  import { runPreRequestScript, type ScriptConsoleEntry } from './lib/scripting';
+  import { runPreRequestScript, runTestScript } from './lib/scripting';
+  import type { ScriptConsoleEntry, ScriptTestOutcome } from './lib/scripting';
 
   type SidebarSection = 'collections' | 'history' | 'environments';
   type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'scripts' | 'settings';
@@ -53,6 +55,9 @@
   let requestTab: RequestTab = 'params';
   let response: ResponseData | null = null;
   let requestError = '';
+  let scriptConsoleLogs: ScriptConsoleEntry[] = [];
+  let scriptTestResults: ScriptTestOutcome[] = [];
+  let testScriptError = '';
   let executing = false;
   let preRequestConsole: ScriptConsoleEntry[] = [];
   let unsavedTabs: Record<string, boolean> = {};
@@ -350,7 +355,7 @@
     const failures: string[] = [];
     for (const file of fileArray) {
       try {
-        collections.push(parsePostmanCollection(await file.text()));
+        collections.push(parseCollectionFile(await file.text()));
       } catch (error) {
         failures.push(`${file.name}: ${error instanceof Error ? error.message : 'import failed'}`);
       }
@@ -686,7 +691,7 @@
       ]
     });
     const output = {
-      info: { name: collection.name, description: collection.description, schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
+      info: { name: collection.name, description: collection.description, schema: 'https://schema.postcall.app/collection/v2.1.0/collection.json' },
       auth: toAuth(collection.auth),
       variable: toVariableList(collection.variables),
       item: [
@@ -868,53 +873,33 @@
     preRequestConsole = [];
     if (!request.preRequestScript.trim()) return { request, runtimeVariables };
 
-    const environmentVars = Object.fromEntries(
-      (activeEnvironment?.variables ?? []).filter((row) => row.enabled && row.key).map((row) => [row.key, row.value])
-    );
-    const availableVars = Object.fromEntries(resolvedVariables(request, runtimeVariables).map((item) => [item.key, item.value]));
-    const headerRows = request.headers.filter((row) => row.enabled && row.key).map((row) => ({ key: row.key, value: row.value }));
-
+    const shared = scriptSharedContext(request, runtimeVariables);
     const result = await runPreRequestScript(request.preRequestScript, {
-      url: resolveVariables(request.url, request, runtimeVariables),
-      method: request.method,
-      headers: headerRows,
-      variables: availableVars,
-      environment: environmentVars,
-      hasEnvironment: Boolean(activeEnvironment)
+      request: {
+        method: request.method,
+        url: request.url,
+        headers: request.headers.filter((row) => row.enabled && row.key).map((row) => ({ key: row.key, value: row.value })),
+        body: request.body
+      },
+      environment: shared.environment,
+      collectionVariables: shared.collectionVariables,
+      variables: shared.variables,
+      requestName: shared.requestName
     });
-    preRequestConsole = result.console;
-    if (result.error) throw new Error(`Pre-request script error: ${result.error}`);
+    preRequestConsole = result.consoleLogs;
+    if (!result.ok) throw new Error(`Pre-request script error: ${result.error}`);
 
-    if (Object.keys(result.environmentUpdates).length && activeEnvironment) {
-      const envId = activeEnvironment.id;
-      workspace.environments = workspace.environments.map((environment) => {
-        if (environment.id !== envId) return environment;
-        const variables = [...environment.variables];
-        for (const [key, value] of Object.entries(result.environmentUpdates)) {
-          const index = variables.findIndex((row) => row.key === key);
-          if (index >= 0) variables[index] = { ...variables[index], value, enabled: true };
-          else {
-            const blankIndex = variables.findIndex((row) => !row.key && !row.value);
-            const newRow = { id: uid(), key, value, enabled: true };
-            if (blankIndex >= 0) variables.splice(blankIndex, 0, newRow);
-            else variables.push(newRow);
-          }
-        }
-        return { ...environment, variables };
-      });
-      commitWorkspace();
-    }
+    applyEnvironmentMutations(result.environmentSets, result.environmentUnsets);
+    applyCollectionVariableMutations(shared.collection, result.collectionVariableSets, result.collectionVariableUnsets);
 
-    const mergedVariables = { ...runtimeVariables, ...result.variables, ...result.environmentUpdates };
-    let headers = request.headers;
-    for (const header of result.headers) {
-      const lower = header.key.toLowerCase();
-      const index = headers.findIndex((row) => row.key.toLowerCase() === lower);
-      if (index >= 0) headers = headers.map((row, rowIndex) => rowIndex === index ? { ...row, value: header.value, enabled: true } : row);
-      else headers = [...headers, { id: uid(), key: header.key, value: header.value, enabled: true }];
-    }
-    const effectiveRequest = headers === request.headers ? request : { ...request, headers };
-    return { request: effectiveRequest, runtimeVariables: mergedVariables };
+    const effectiveRequest = {
+      ...structuredClone(request),
+      method: result.request.method,
+      url: result.request.url,
+      body: result.request.body,
+      headers: mergeHeaderMutations(request.headers, result.request.headers)
+    };
+    return { request: effectiveRequest, runtimeVariables: { ...runtimeVariables, ...result.variableSets } };
   }
 
   function selectActiveEnvironment(id: string) {
@@ -1040,15 +1025,97 @@
     commitWorkspace();
   }
 
+  function scriptSharedContext(request: ApiRequest, runtimeVariables: Record<string, string> = {}) {
+    const scope = requestScope(request);
+    const toMap = (rows: KeyValue[]) => Object.fromEntries(rows.filter((row) => row.enabled && row.key).map((row) => [row.key, row.value]));
+    return {
+      collection: scope?.collection,
+      environment: toMap(activeEnvironment?.variables ?? []),
+      collectionVariables: toMap(scope?.collection.variables ?? []),
+      variables: Object.fromEntries(resolvedVariables(request, runtimeVariables).map((item) => [item.key, item.value])),
+      requestName: request.name
+    };
+  }
+
+  function mergeHeaderMutations(original: KeyValue[], mutated: Array<{ key: string; value: string }>): KeyValue[] {
+    const untouched = original.filter((row) => !(row.enabled && row.key));
+    const mutatedRows = mutated.map((entry) => {
+      const existing = original.find((row) => row.enabled && row.key.toLowerCase() === entry.key.toLowerCase());
+      return existing ? { ...existing, key: entry.key, value: entry.value } : { id: uid(), key: entry.key, value: entry.value, enabled: true };
+    });
+    return [...mutatedRows, ...untouched];
+  }
+
+  function applyEnvironmentMutations(sets: Record<string, string>, unsets: string[]) {
+    if (!activeEnvironment || (!Object.keys(sets).length && !unsets.length)) return;
+    for (const [key, value] of Object.entries(sets)) {
+      const row = activeEnvironment.variables.find((item) => item.key === key);
+      if (row) row.value = value;
+      else activeEnvironment.variables.push({ id: uid(), key, value, enabled: true });
+    }
+    if (unsets.length) activeEnvironment.variables = activeEnvironment.variables.filter((item) => !unsets.includes(item.key));
+    commitWorkspace();
+  }
+
+  function applyCollectionVariableMutations(collection: Collection | undefined, sets: Record<string, string>, unsets: string[]) {
+    if (!collection || (!Object.keys(sets).length && !unsets.length)) return;
+    for (const [key, value] of Object.entries(sets)) {
+      const row = collection.variables.find((item) => item.key === key);
+      if (row) row.value = value;
+      else collection.variables.push({ id: uid(), key, value, enabled: true });
+    }
+    if (unsets.length) collection.variables = collection.variables.filter((item) => !unsets.includes(item.key));
+    commitWorkspace();
+  }
+
   async function sendRequest() {
     if (!activeRequest || executing) return;
     requestError = '';
+    testScriptError = '';
     response = null;
+    scriptConsoleLogs = [];
+    scriptTestResults = [];
     executing = true;
     let historyEntry: HistoryEntry | null = null;
     try {
-      const { request: effectiveRequest, runtimeVariables } = await prepareRequestForSend(activeRequest);
-      const { input, inferredProtocol } = buildRequestInput(effectiveRequest, runtimeVariables);
+      let workingRequest = activeRequest;
+      let runtimeVariables: Record<string, string> = {};
+
+      if (activeRequest.preRequestScript.trim()) {
+        const shared = scriptSharedContext(activeRequest);
+        const preResult = await runPreRequestScript(activeRequest.preRequestScript, {
+          request: {
+            method: activeRequest.method,
+            url: activeRequest.url,
+            headers: activeRequest.headers.filter((row) => row.enabled && row.key).map((row) => ({ key: row.key, value: row.value })),
+            body: activeRequest.body
+          },
+          environment: shared.environment,
+          collectionVariables: shared.collectionVariables,
+          variables: shared.variables,
+          requestName: shared.requestName
+        });
+        scriptConsoleLogs = [...scriptConsoleLogs, ...preResult.consoleLogs];
+        applyEnvironmentMutations(preResult.environmentSets, preResult.environmentUnsets);
+        applyCollectionVariableMutations(shared.collection, preResult.collectionVariableSets, preResult.collectionVariableUnsets);
+        runtimeVariables = { ...preResult.variableSets };
+
+        if (!preResult.ok) {
+          requestError = `Pre-request script error: ${preResult.error}`;
+          historyEntry = { id: uid(), request: structuredClone(activeRequest), createdAt: new Date().toISOString() };
+          return;
+        }
+
+        workingRequest = {
+          ...structuredClone(activeRequest),
+          method: preResult.request.method,
+          url: preResult.request.url,
+          body: preResult.request.body,
+          headers: mergeHeaderMutations(activeRequest.headers, preResult.request.headers)
+        };
+      }
+
+      const { input, inferredProtocol } = buildRequestInput(workingRequest, runtimeVariables);
       response = await executeResolvedRequest(input, inferredProtocol);
       historyEntry = {
         id: uid(),
@@ -1058,6 +1125,30 @@
         createdAt: new Date().toISOString(),
         response: truncateResponseForHistory(response)
       };
+
+      if (activeRequest.testScript.trim()) {
+        const shared = scriptSharedContext(activeRequest, runtimeVariables);
+        const testResult = await runTestScript(activeRequest.testScript, {
+          request: { method: input.method, url: input.url, headers: input.headers.map(([key, value]) => ({ key, value })), body: input.body ?? '' },
+          response: {
+            code: response.status,
+            status: response.statusText,
+            responseTime: response.elapsedMs,
+            responseSize: response.sizeBytes,
+            headers: response.headers.map((row) => ({ key: row.key, value: row.value })),
+            body: response.body
+          },
+          environment: shared.environment,
+          collectionVariables: shared.collectionVariables,
+          variables: shared.variables,
+          requestName: shared.requestName
+        });
+        scriptConsoleLogs = [...scriptConsoleLogs, ...testResult.consoleLogs];
+        scriptTestResults = testResult.tests;
+        if (!testResult.ok) testScriptError = `Test script error: ${testResult.error}`;
+        applyEnvironmentMutations(testResult.environmentSets, testResult.environmentUnsets);
+        applyCollectionVariableMutations(shared.collection, testResult.collectionVariableSets, testResult.collectionVariableUnsets);
+      }
     } catch (error) {
       requestError = error instanceof Error ? error.message : String(error);
       historyEntry = { id: uid(), request: structuredClone(activeRequest), createdAt: new Date().toISOString(), requestError };
@@ -1528,6 +1619,62 @@
     return {};
   }
 
+  type HelpTab = 'start' | 'variables' | 'scripts' | 'shortcuts';
+  let helpTab: HelpTab = 'start';
+
+  type ScriptExample = { title: string; description: string; code: string };
+  const preRequestExamples: ScriptExample[] = [
+    {
+      title: 'Add a dynamic header',
+      description: 'Attach a fresh timestamp to every outgoing request.',
+      code: `pm.request.headers.upsert({ key: 'X-Request-Time', value: new Date().toISOString() });`
+    },
+    {
+      title: 'Read an environment variable',
+      description: 'Log a variable’s current value to the Console tab before sending.',
+      code: `console.log('Base URL:', pm.environment.get('baseUrl'));`
+    },
+    {
+      title: 'Generate a one-off value',
+      description: 'Create a value only this send can use — reference it as {{requestId}} in the URL, headers, or body.',
+      code: `pm.variables.set('requestId', Math.random().toString(36).slice(2));`
+    }
+  ];
+  const testExamples: ScriptExample[] = [
+    {
+      title: 'Check the status code',
+      description: 'Fail the test if the response isn’t 200.',
+      code: `pm.test('Status code is 200', () => {\n  pm.expect(pm.response).to.have.status(200);\n});`
+    },
+    {
+      title: 'Assert a JSON field exists',
+      description: 'Fail if the body is missing a field you rely on — adjust the field name to match your API.',
+      code: `pm.test('Response has a url field', () => {\n  const body = pm.response.json();\n  pm.expect(body).to.have.property('url');\n});`
+    },
+    {
+      title: 'Save a token for later requests',
+      description: 'Pull a value out of the response into the active environment so the next request can use {{authToken}}.',
+      code: `const body = pm.response.json();\npm.environment.set('authToken', body.token);`
+    }
+  ];
+
+  function insertScriptExample(kind: 'pre' | 'test', code: string) {
+    if (!activeRequest) return;
+    const target = kind === 'pre' ? activeRequest.preRequestScript : activeRequest.testScript;
+    const merged = target.trim() ? `${target.trim()}\n\n${code}` : code;
+    if (kind === 'pre') activeRequest.preRequestScript = merged;
+    else activeRequest.testScript = merged;
+    markChanged();
+    requestTab = 'scripts';
+    utilityModal = null;
+    showToast(`${kind === 'pre' ? 'Pre-request' : 'Test'} example inserted`);
+  }
+
+  async function copySnippet(code: string) {
+    await navigator.clipboard.writeText(code);
+    showToast('Snippet copied');
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
@@ -1652,9 +1799,14 @@
 
           <div class="url-row">
             <div class="url-input-wrap">
-              <select bind:value={activeRequest.method} on:change={markChanged} class="method-select {activeRequest.method.toLowerCase()}" aria-label="HTTP method">
-                {#each ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as method}<option>{method}</option>{/each}
-              </select>
+              <CustomSelect
+                bind:value={activeRequest.method}
+                options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((method) => ({ value: method, label: method }))}
+                optionClass={(method) => method.toLowerCase()}
+                onChange={markChanged}
+                class="method-select"
+                ariaLabel="HTTP method"
+              />
               <input bind:value={activeRequest.url} on:input={syncPathParams} placeholder="Enter request URL" aria-label="Request URL" />
               <button class="variables-button" on:click={() => utilityModal = 'variables'} title="View resolved variables"><Braces size={16} /></button>
             </div>
@@ -1666,10 +1818,12 @@
           <div class="environment-line">
             <label class="environment-selector">
               <Globe2 size={13} />
-              <select aria-label="Active environment" value={workspace.activeEnvironmentId ?? ''} on:change={(event) => selectActiveEnvironment(event.currentTarget.value)}>
-                <option value="">No environment</option>
-                {#each workspace.environments as environment}<option value={environment.id}>{environment.name}</option>{/each}
-              </select>
+              <CustomSelect
+                value={workspace.activeEnvironmentId ?? ''}
+                options={[{ value: '', label: 'No environment' }, ...workspace.environments.map((environment) => ({ value: environment.id, label: environment.name }))]}
+                onChange={selectActiveEnvironment}
+                ariaLabel="Active environment"
+              />
             </label>
             <span>{activeEnvironment ? 'Environment values override matching folder and collection variables.' : 'Using folder and collection variables.'}</span>
           </div>
@@ -1732,8 +1886,8 @@
                       <label>Password<input bind:value={activeRequest.auth.password} on:input={markChanged} placeholder={'Password or {{variable}}'} /></label>
                     {:else}
                       <label>Key<input bind:value={activeRequest.auth.key} on:input={markChanged} placeholder="X-API-Key" /></label>
-                      <label>Value<input bind:value={activeRequest.auth.value} on:input={markChanged} placeholder={'API key value or {{variable}}'} /></label>
-                      <label>Add to<select bind:value={activeRequest.auth.placement} on:change={markChanged}><option value="header">Header</option><option value="query">Query params</option></select></label>
+                      <label>Value<input type="password" bind:value={activeRequest.auth.value} on:input={markChanged} placeholder="API key value" /></label>
+                      <label>Add to<CustomSelect bind:value={activeRequest.auth.placement as 'header' | 'query'} options={[{ value: 'header', label: 'Header' }, { value: 'query', label: 'Query params' }]} onChange={markChanged} ariaLabel="Add API key to" /></label>
                     {/if}
                   </div>
                 </div>
@@ -1748,9 +1902,12 @@
                 {:else if ['json', 'text', 'javascript', 'html', 'xml'].includes(activeRequest.bodyMode)}
                   <div class="raw-language-row">
                     <span>Raw format</span>
-                    <select bind:value={activeRequest.bodyMode} on:change={markChanged}>
-                      <option value="text">Text</option><option value="javascript">JavaScript</option><option value="json">JSON</option><option value="html">HTML</option><option value="xml">XML</option>
-                    </select>
+                    <CustomSelect
+                      bind:value={activeRequest.bodyMode}
+                      options={[{ value: 'text', label: 'Text' }, { value: 'javascript', label: 'JavaScript' }, { value: 'json', label: 'JSON' }, { value: 'html', label: 'HTML' }, { value: 'xml', label: 'XML' }]}
+                      onChange={markChanged}
+                      ariaLabel="Raw body format"
+                    />
                   </div>
                   <CodeEditor bind:value={activeRequest.body} language={activeRequest.bodyMode} onChange={markChanged} placeholder="Enter request body" />
                 {:else if activeRequest.bodyMode === 'form'}
@@ -1779,7 +1936,7 @@
                     <CodeEditor bind:value={activeRequest.preRequestScript} language="javascript" onChange={markChanged} />
                     {#if preRequestConsole.length}
                       <div class="script-console">
-                        {#each preRequestConsole as entry}<div class="script-console-line {entry.level}">{entry.message}</div>{/each}
+                        {#each preRequestConsole as entry}<div class="script-console-line {entry.level}">{entry.text}</div>{/each}
                       </div>
                     {/if}
                   </div>
@@ -1798,7 +1955,7 @@
 
           <button type="button" class="panel-resizer" aria-label="Resize request and response panels" on:pointerdown={startResize}><span></span></button>
 
-          <ResponseViewer {response} loading={executing} error={requestError} />
+          <ResponseViewer {response} loading={executing} error={requestError} testResults={scriptTestResults} consoleLogs={scriptConsoleLogs} scriptError={testScriptError} />
         </div>
       {/if}
     </main>
@@ -1887,10 +2044,12 @@
                 Choose a request count or elapsed time
               </small>
           </span>
-          <select bind:value={loadTestRunMode} disabled={loadTestRunning}>
-            <option value="requests">Number of requests</option>
-            <option value="duration">Duration in hours</option>
-          </select>
+          <CustomSelect
+            bind:value={loadTestRunMode}
+            options={[{ value: 'requests', label: 'Number of requests' }, { value: 'duration', label: 'Duration in hours' }]}
+            disabled={loadTestRunning}
+            ariaLabel="Run by"
+          />
         </label>
           {#if loadTestRunMode === 'requests'}<label><span>Total requests<small>Maximum 10,000 per run</small></span><input type="number" min="1" max="10000" step="1" bind:value={loadTestTotal} disabled={loadTestRunning} /></label>
           {:else}<label><span>Duration<small>0.001 to 168 hours</small></span><input type="number" min="0.001" max="168" step="0.25" bind:value={loadTestDurationHours} disabled={loadTestRunning} /></label>{/if}
@@ -2072,8 +2231,8 @@
                   <label>Password<input bind:value={scopeSettings.auth.password} placeholder={'Password or {{variable}}'} /></label>
                 {:else if scopeSettings.auth.type === 'api-key'}
                   <label>Key<input bind:value={scopeSettings.auth.key} placeholder="X-API-Key" /></label>
-                  <label>Value<input bind:value={scopeSettings.auth.value} placeholder={'Value or {{variable}}'} /></label>
-                  <label>Add to<select bind:value={scopeSettings.auth.placement}><option value="header">Header</option><option value="query">Query params</option></select></label>
+                  <label>Value<input type="password" bind:value={scopeSettings.auth.value} placeholder={'Value or {{variable}}'} /></label>
+                  <label>Add to<CustomSelect bind:value={scopeSettings.auth.placement as 'header' | 'query'} options={[{ value: 'header', label: 'Header' }, { value: 'query', label: 'Query params' }]} ariaLabel="Add API key to" /></label>
                 {/if}
               </div>
             </div>
@@ -2140,14 +2299,14 @@
       <div class="modal request-action-modal" role="dialog" aria-modal="true" aria-label="Move request">
         <div class="modal-header"><div><span class="modal-icon"><FileUp size={18} /></span><div><strong>Move “{pendingRequestAction.request.name}”</strong><p>Select a collection or folder for this request.</p></div></div><button class="icon-button" on:click={() => pendingRequestAction = null} aria-label="Close dialog"><X size={17} /></button></div>
         <label class="field-label">Destination
-          <select bind:value={moveTarget} aria-label="Request destination">
-            {#each workspace.collections as collection (collection.id)}
-              <option value={requestLocationValue(collection, null)}>{collection.name}</option>
-              {#each collection.folders as folder (folder.id)}
-                <option value={requestLocationValue(collection, folder)}>{collection.name} / {folder.name}</option>
-              {/each}
-            {/each}
-          </select>
+          <CustomSelect
+            bind:value={moveTarget}
+            options={workspace.collections.flatMap((collection) => [
+              { value: requestLocationValue(collection, null), label: collection.name },
+              ...collection.folders.map((folder) => ({ value: requestLocationValue(collection, folder), label: `${collection.name} / ${folder.name}` }))
+            ])}
+            ariaLabel="Request destination"
+          />
         </label>
         <div class="modal-footer"><button class="secondary-button" on:click={() => pendingRequestAction = null}>Cancel</button><button class="primary-button" disabled={moveTarget === requestLocationValue(pendingRequestAction.collection, pendingRequestAction.folder)} on:click={applyRequestMove}>Move request</button></div>
       </div>
@@ -2167,10 +2326,86 @@
     <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget) utilityModal = null; }}>
       <div class="modal utility-modal" class:code-generator-modal={utilityModal === 'code'} role="dialog" aria-modal="true" aria-label={`${utilityModal} dialog`}>
         <div class="modal-header">
-          <div><span class="modal-icon">{#if utilityModal === 'code'}<Code2 size={18} />{:else if utilityModal === 'variables'}<Braces size={18} />{:else if utilityModal === 'help'}<HelpCircle size={18} />{:else if utilityModal === 'settings'}<Settings2 size={18} />{:else}<Command size={18} />{/if}</span><div><strong>{utilityModal === 'code' ? 'Generate code' : utilityModal === 'variables' ? 'Resolved variables' : utilityModal === 'help' ? 'Reqora help' : utilityModal === 'settings' ? 'Application settings' : 'Command palette'}</strong><p>{utilityModal === 'code' ? 'Ready-to-run examples using the resolved URL, headers, authorization, and body.' : utilityModal === 'variables' ? 'Merged values and the scope supplying each one.' : utilityModal === 'help' ? 'Keyboard shortcuts and local workspace behavior.' : utilityModal === 'settings' ? 'Configure your local Reqora experience.' : 'Jump directly to a Reqora action.'}</p></div></div>
+          <div><span class="modal-icon">{#if utilityModal === 'code'}<Code2 size={18} />{:else if utilityModal === 'variables'}<Braces size={18} />{:else if utilityModal === 'help'}<HelpCircle size={18} />{:else if utilityModal === 'settings'}<Settings2 size={18} />{:else}<Command size={18} />{/if}</span><div><strong>{utilityModal === 'code' ? 'Generate code' : utilityModal === 'variables' ? 'Resolved variables' : utilityModal === 'help' ? 'Help & examples' : utilityModal === 'settings' ? 'Application settings' : 'Command palette'}</strong><p>{utilityModal === 'code' ? 'Ready-to-run examples using the resolved URL, headers, authorization, and body.' : utilityModal === 'variables' ? 'Merged values and the scope supplying each one.' : utilityModal === 'help' ? 'Learn the basics, try pre-request and test scripts, and see every shortcut.' : utilityModal === 'settings' ? 'Configure your local Reqora experience.' : 'Jump directly to a Reqora action.'}</p></div></div>
           <button class="icon-button" on:click={() => utilityModal = null} aria-label="Close dialog"><X size={17} /></button>
         </div>
-        {#if utilityModal === 'code'}
+        {#if utilityModal === 'help'}
+          <div class="help-tabs">
+            <button class:active={helpTab === 'start'} on:click={() => helpTab = 'start'}>Getting started</button>
+            <button class:active={helpTab === 'variables'} on:click={() => helpTab = 'variables'}>Variables</button>
+            <button class:active={helpTab === 'scripts'} on:click={() => helpTab = 'scripts'}>Scripts</button>
+            <button class:active={helpTab === 'shortcuts'} on:click={() => helpTab = 'shortcuts'}>Shortcuts</button>
+          </div>
+          {#if helpTab === 'start'}
+            <div class="help-guide">
+              <ol>
+                <li><strong>Create a request.</strong> Click <em>New request</em>, pick a method, and enter a URL — try <code>https://httpbin.org/anything</code> to experiment safely.</li>
+                <li><strong>Add params, headers, or a body.</strong> Use the tabs under the URL bar. Query params sync automatically with <code>?key=value</code> in the URL.</li>
+                <li><strong>Send it.</strong> Click <em>Send</em> (or <kbd>⌘ ↵</kbd>) and inspect the response — Body, Headers, Tests, and Console tabs are on the right.</li>
+                <li><strong>Save it.</strong> Click <em>Save</em> to file it under a collection so it persists and can be reused in Flows.</li>
+                <li><strong>Organize with collections and folders.</strong> Group related requests and share variables or auth across everything inside.</li>
+              </ol>
+              <p>Everything is stored locally on this device — nothing leaves your machine unless a request you send does.</p>
+            </div>
+          {:else if helpTab === 'variables'}
+            <div class="help-guide">
+              <p>Variables let you write <code>{'{{baseUrl}}'}</code> anywhere in a URL, header, or body and have it filled in at send time.</p>
+              <ol>
+                <li><strong>Environments</strong> hold values that differ per setup (local, staging, production). Switch the active one from the dropdown next to the URL bar.</li>
+                <li><strong>Collection and folder variables</strong> are shared by every request inside them — good for things like a shared <code>{'{{baseUrl}}'}</code>.</li>
+                <li>When the same key exists in more than one place, the order is: <strong>Environment</strong> overrides <strong>folder</strong>, which overrides <strong>collection</strong>.</li>
+                <li>Click the <Braces size={11} /> icon next to the URL bar any time to see every variable this request can currently see, and where each value is coming from.</li>
+              </ol>
+            </div>
+          {:else if helpTab === 'scripts'}
+            <div class="help-scripts">
+              <p>Scripts run JavaScript around your request — a <strong>pre-request script</strong> can rewrite the URL, headers, or body before it's sent, and a <strong>test script</strong> can assert things about the response. Both use a small <code>pm</code> API, sandboxed in a worker with no network access of its own.</p>
+              <div class="help-api-ref">
+                <div><code>pm.environment.get/set(key, value)</code><span>Read or write the active environment</span></div>
+                <div><code>pm.variables.get/set(key, value)</code><span>A value scoped to just this send</span></div>
+                <div><code>pm.request.headers.upsert({'{ key, value }'})</code><span>Add or replace a header (pre-request only)</span></div>
+                <div><code>pm.response.json() / .text()</code><span>Read the response body (test only)</span></div>
+                <div><code>pm.test(name, fn)</code> + <code>pm.expect(value)</code><span>Write an assertion</span></div>
+                <div><code>console.log(...)</code><span>Shows up in the response's Console tab</span></div>
+              </div>
+              <div class="help-example-group">
+                <h4><Play size={12} /> Pre-request examples</h4>
+                {#each preRequestExamples as example}
+                  <div class="help-example">
+                    <div class="help-example-head"><div><strong>{example.title}</strong><small>{example.description}</small></div>
+                      <div class="help-example-actions">
+                        <button class="icon-button" title="Copy" on:click={() => copySnippet(example.code)}><Copy size={13} /></button>
+                        <button class="secondary-button" on:click={() => insertScriptExample('pre', example.code)}>Try it</button>
+                      </div>
+                    </div>
+                    <pre>{example.code}</pre>
+                  </div>
+                {/each}
+              </div>
+              <div class="help-example-group">
+                <h4><Sparkles size={12} /> Test examples</h4>
+                {#each testExamples as example}
+                  <div class="help-example">
+                    <div class="help-example-head"><div><strong>{example.title}</strong><small>{example.description}</small></div>
+                      <div class="help-example-actions">
+                        <button class="icon-button" title="Copy" on:click={() => copySnippet(example.code)}><Copy size={13} /></button>
+                        <button class="secondary-button" on:click={() => insertScriptExample('test', example.code)}>Try it</button>
+                      </div>
+                    </div>
+                    <pre>{example.code}</pre>
+                  </div>
+                {/each}
+              </div>
+              {#if !activeRequest}<p class="help-note">Open or create a request to use “Try it”.</p>{/if}
+            </div>
+          {:else}
+            <div class="help-content">
+              <div><kbd>⌘ ↵</kbd><span>Send the active request</span></div><div><kbd>⌘ S</kbd><span>Save the active request</span></div><div><kbd>Drag</kbd><span>Resize the request and response panels</span></div>
+              <p>Postcall is local-first. Collections, environments, and history are stored on this device.</p>
+            </div>
+          {/if}
+          <div class="modal-footer"><button class="primary-button" on:click={() => utilityModal = null}>Got it</button></div>
+        {:else if utilityModal === 'code'}
           <div class="code-generator-body">
             <nav class="code-language-list" aria-label="Code language">
               {#each codeLanguageOptions as option}
@@ -2259,12 +2494,6 @@
             />
           </div>
           <div class="modal-footer"><button class="primary-button" on:click={() => utilityModal = null}>Done</button></div>
-        {:else}
-          <div class="help-content">
-            <div><kbd>⌘ ↵</kbd><span>Send the active request</span></div><div><kbd>⌘ S</kbd><span>Save the active request</span></div><div><kbd>Drag</kbd><span>Resize the request and response panels</span></div>
-            <p>Reqora is local-first. Collections, environments, and history are stored on this device.</p>
-          </div>
-          <div class="modal-footer"><button class="primary-button" on:click={() => utilityModal = null}>Got it</button></div>
         {/if}
       </div>
     </div>

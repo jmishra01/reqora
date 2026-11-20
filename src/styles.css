@@ -181,7 +181,7 @@ input::placeholder, textarea::placeholder { color: #5f646e; }
 .request-config-tabs button { position: relative; height: 37px; border: 0; background: transparent; color: var(--muted); padding: 0 11px; font-size: 10px; display: flex; align-items: center; gap: 6px; }
 .request-config-tabs button.active { color: var(--text); }.request-config-tabs button.active::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: var(--accent); }
 .request-config-tabs span { font-size: 8px; color: var(--muted); border-radius: 7px; background: var(--panel-3); padding: 1px 4px; }.request-config-tabs i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
-.config-content { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+.config-content { flex: 1; min-height: 0; overflow: auto; background: var(--panel); }
 .section-caption { height: 49px; display: flex; align-items: center; padding: 0 21px; }
 .section-caption > div { flex: 1; }.section-caption strong { display: block; font-size: 10px; font-weight: 550; margin-bottom: 3px; }.section-caption p { margin: 0; color: var(--muted-2); font-size: 8.5px; }.section-caption > button { border: 0; background: transparent; color: var(--blue); font-size: 9px; }.section-caption > span { color: var(--muted-2); font-size: 8.5px; display: flex; align-items: center; gap: 5px; }
 .kv-editor { margin: 0 20px 14px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }

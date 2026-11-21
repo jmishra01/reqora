@@ -129,6 +129,13 @@ input::placeholder, textarea::placeholder { color: #5f646e; }
 .environment-row-main > span { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .environment-row strong { font-size: 10.5px; font-weight: 500; }.environment-row small { color: var(--muted-2); font-size: 8.5px; }
 .environment-row > svg { color: var(--muted-2); }
+.flow-row { width: 100%; height: 48px; padding: 6px; gap: 6px; border: 0; background: transparent; border-radius: 6px; display: flex; align-items: center; text-align: left; }
+.flow-row:hover { background: var(--panel-2); }
+.flow-row.selected { background: var(--panel-3); }
+.flow-row-icon { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: var(--purple); background: rgba(177,140,255,.1); }
+.flow-row-main { flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; padding: 0; display: flex; align-items: center; gap: 9px; }
+.flow-row-main > span { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.flow-row strong { font-size: 10.5px; font-weight: 500; }.flow-row small { color: var(--muted-2); font-size: 8.5px; }
 .sidebar-empty { padding: 50px 20px; text-align: center; color: var(--muted-2); font-size: 10px; }
 .sidebar-empty svg { opacity: .5; }.sidebar-empty button { border: 0; color: var(--accent); background: transparent; font-size: 10px; }
 .sidebar-footer { flex: 0 0 37px; border-top: 1px solid var(--line-soft); display: flex; align-items: center; padding: 0 9px 0 13px; color: var(--muted-2); font-size: 9px; }
@@ -228,15 +235,19 @@ input::placeholder, textarea::placeholder { color: #5f646e; }
 .bulk-modal { width: min(620px, calc(100vw - 60px)); }.bulk-modal textarea { display: block; width: calc(100% - 34px); height: 260px; margin: 17px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; outline: 0; background: #111214; color: var(--text); padding: 12px; font-family: var(--mono); font-size: 10px; line-height: 18px; }.light .bulk-modal textarea { background: #fafafa; }.bulk-modal textarea:focus { border-color: var(--border-strong); }.bulk-modal code { font-family: var(--mono); color: var(--purple); }
 .curl-import-modal { width: min(680px, calc(100vw - 60px)); }.curl-import-modal textarea { display: block; width: calc(100% - 34px); height: 280px; margin: 17px 17px 10px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; outline: 0; background: #111214; color: #d8e2dc; padding: 13px; font-family: var(--mono); font-size: 10px; line-height: 18px; white-space: pre; }.light .curl-import-modal textarea { background: #fafafa; color: #27352e; }.curl-import-modal textarea:focus { border-color: var(--border-strong); }.import-error { margin: 0 17px 12px; padding: 8px 10px; border: 1px solid rgba(255,102,122,.3); border-radius: 5px; background: rgba(255,102,122,.08); color: var(--danger); font-size: 9px; }
 .load-test-modal { width: min(840px, calc(100vw - 60px)); }
-.flow-modal { width: min(1320px, calc(100vw - 32px)); height: min(880px, calc(100vh - 32px)); display: flex; flex-direction: column; }
-.flow-layout { min-height: 0; flex: 1; display: grid; grid-template-columns: 190px 1fr; }
-.flow-sidebar { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--bg); }
-.flow-sidebar-heading { height: 43px; padding: 0 10px 0 14px; display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 8.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
-.flow-sidebar-heading span { flex: 1; }.flow-sidebar-heading button { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); }.flow-sidebar-heading button:hover { background: var(--panel-3); color: var(--text); }
-.flow-saved-list { min-height: 0; flex: 1; overflow: auto; padding: 7px; }.flow-saved-list > button { width: 100%; min-height: 46px; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); text-align: left; }.flow-saved-list > button:hover { background: var(--panel-2); }.flow-saved-list > button.active { border-color: var(--line); background: var(--panel-3); color: var(--text); }.flow-saved-list > button > svg { flex: 0 0 auto; color: var(--purple); }.flow-saved-list > button span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }.flow-saved-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }.flow-saved-list small { color: var(--muted-2); font-size: 7.5px; }.flow-saved-list > p { margin: 25px 8px; color: var(--muted-2); font-size: 8.5px; text-align: center; }
-.flow-editor-shell { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.flow-name-row { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 210px; gap: 12px; padding: 15px 18px 12px; }.flow-name-row > label:first-child { color: var(--muted); font-size: 8.5px; }.flow-name-row input[type="text"], .flow-name-row > label:first-child input { width: 100%; height: 32px; display: block; margin-top: 6px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); outline: 0; font-size: 10px; }.flow-name-row input:focus { border-color: var(--muted-2); }.flow-stop-option { height: 49px; margin-top: 0; display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }.flow-stop-option > span { display: flex; flex-direction: column; gap: 3px; }.flow-stop-option strong { font-size: 8.5px; }.flow-stop-option small { color: var(--muted-2); font-size: 7.5px; }
-.flow-footer .flow-delete-button { height: 29px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--muted); font-size: 8.5px; }.flow-footer .flow-delete-button:hover { color: var(--danger); }.flow-footer > div { flex: 1; }.flow-variable-count { color: var(--purple); font-size: 8px; }
+.flow-section { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.flow-section-header { flex: 0 0 60px; display: flex; align-items: center; gap: 14px; padding: 0 17px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.flow-section-header > label:nth-of-type(1) { flex: 1; min-width: 0; color: var(--muted); font-size: 8.5px; }
+.flow-section-header > label:nth-of-type(1) input { width: 100%; height: 32px; display: block; margin-top: 6px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); outline: 0; font-size: 10px; color: var(--text); }
+.flow-section-header > label:nth-of-type(1) input:focus { border-color: var(--muted-2); }
+.flow-stop-option { height: 44px; flex: 0 0 auto; display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.flow-stop-option > span { display: flex; flex-direction: column; gap: 3px; }
+.flow-stop-option strong { font-size: 8.5px; }
+.flow-stop-option small { color: var(--muted-2); font-size: 7.5px; }
+.flow-section-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.flow-delete-button { height: 29px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--muted); font-size: 8.5px; }
+.flow-delete-button:hover { color: var(--danger); }
+.flow-variable-count { color: var(--purple); font-size: 8px; white-space: nowrap; }
 .flow-canvas-root { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .flow-toolbar { flex: 0 0 42px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 14px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .flow-palette { display: flex; align-items: center; gap: 6px; }.flow-palette button { height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 8.5px; }.flow-palette button:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }.flow-palette button:disabled { opacity: .4; }

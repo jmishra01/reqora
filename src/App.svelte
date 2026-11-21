@@ -3,7 +3,7 @@
   import {
     Activity, AlertTriangle, Braces, Check, Cloud, CodeXml as Code2, Command, Copy, Download, Eye, FileUp,
     Earth as Globe2, Github, CircleQuestionMark as HelpCircle, Layers3, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Search, Settings2,
-    Sparkles, Sun, X, Trash2, Workflow
+    Sparkles, Sun, X, Trash2
   } from '@lucide/svelte';
   import Sidebar from './components/Sidebar.svelte';
   import KeyValueEditor from './components/KeyValueEditor.svelte';
@@ -28,7 +28,7 @@
   import { runPreRequestScript, runTestScript } from './lib/scripting';
   import type { ScriptConsoleEntry, ScriptTestOutcome } from './lib/scripting';
 
-  type SidebarSection = 'collections' | 'history' | 'environments';
+  type SidebarSection = 'collections' | 'history' | 'environments' | 'flows';
   type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'scripts' | 'settings';
   type UtilityModal = 'command' | 'help' | 'settings' | 'code' | 'variables' | null;
   type RequestAction = {
@@ -125,7 +125,6 @@
   let loadTestMinRps = 1;
   let loadTestMaxErrorRate = 1;
   let loadTestRequestId: string | null = null;
-  let flowOpen = false;
   let flowEditor: Flow | null = null;
   let flowRunning = false;
   let flowResults: Record<string, FlowNodeResult> = {};
@@ -1165,16 +1164,18 @@
     return blankFlow(`Flow ${workspace.flows.length + 1}`);
   }
 
-  function openFlows() {
-    flowEditor = structuredClone(workspace.flows[0] ?? newFlow());
-    flowResults = {};
-    flowRunVariables = {};
-    flowOpen = true;
+  function openFlowsSection() {
+    activeSection = 'flows';
+    if (!flowEditor) {
+      flowEditor = structuredClone(workspace.flows[0] ?? newFlow());
+      flowResults = {};
+      flowRunVariables = {};
+    }
   }
 
-  function editFlow(id: string) {
-    const flow = workspace.flows.find((item) => item.id === id);
-    if (!flow || flowRunning) return;
+  function selectFlow(flow: Flow) {
+    if (flowRunning) return;
+    activeSection = 'flows';
     flowEditor = structuredClone(flow);
     flowResults = {};
     flowRunVariables = {};
@@ -1182,6 +1183,7 @@
 
   function createFlow() {
     if (flowRunning) return;
+    activeSection = 'flows';
     flowEditor = newFlow();
     flowResults = {};
     flowRunVariables = {};
@@ -1199,15 +1201,16 @@
     return true;
   }
 
-  function deleteFlow() {
-    if (!flowEditor || flowRunning) return;
-    const existing = workspace.flows.find((item) => item.id === flowEditor?.id);
-    if (existing && !window.confirm(`Delete “${existing.name}”?`)) return;
-    workspace.flows = workspace.flows.filter((item) => item.id !== flowEditor?.id);
+  function deleteFlow(flow: Flow) {
+    if (flowRunning) return;
+    if (!window.confirm(`Delete “${flow.name}”?`)) return;
+    workspace.flows = workspace.flows.filter((item) => item.id !== flow.id);
     commitWorkspace();
-    flowEditor = structuredClone(workspace.flows[0] ?? newFlow());
-    flowResults = {};
-    flowRunVariables = {};
+    if (flowEditor?.id === flow.id) {
+      flowEditor = structuredClone(workspace.flows[0] ?? newFlow());
+      flowResults = {};
+      flowRunVariables = {};
+    }
   }
 
   function onFlowChange() {
@@ -1730,7 +1733,11 @@
         onImportCollections={importCollectionFiles}
         onImportCurl={openCurlImport}
         selectedRequestId={activeRequestId}
-        onSection={(section) => activeSection = section}
+        selectedFlowId={flowEditor?.id ?? ''}
+        onSection={(section) => { if (section === 'flows') openFlowsSection(); else activeSection = section; }}
+        onSelectFlow={selectFlow}
+        onNewFlow={createFlow}
+        onDeleteFlow={deleteFlow}
         onOpenRequest={openRequest}
         onOpenHistoryEntry={openHistoryEntry}
         onDeleteHistoryEntry={deleteHistoryEntry}
@@ -1761,6 +1768,22 @@
     {/if}
 
     <main class="main-panel">
+      {#if activeSection === 'flows' && flowEditor}
+        <div class="flow-section">
+          <div class="flow-section-header">
+            <button class="sidebar-toggle" on:click={() => sidebarVisible = !sidebarVisible} title="Toggle sidebar"><PanelLeftClose size={16} /></button>
+            <label><span>Flow name</span><input bind:value={flowEditor.name} placeholder="Sign up and create project" disabled={flowRunning} /></label>
+            <label class="flow-stop-option"><input type="checkbox" bind:checked={flowEditor.stopOnError} disabled={flowRunning} /><span><strong>Stop on error</strong><small>Halt the flow after a failed node</small></span></label>
+            <div class="flow-section-actions">
+              <button class="flow-delete-button" on:click={() => flowEditor && deleteFlow(flowEditor)} disabled={flowRunning}><Trash2 size={13} /> Delete</button>
+              {#if Object.keys(flowRunVariables).length}<span class="flow-variable-count">{Object.keys(flowRunVariables).length} runtime {Object.keys(flowRunVariables).length === 1 ? 'variable' : 'variables'}</span>{/if}
+              <button class="secondary-button" on:click={() => saveFlow()} disabled={flowRunning}>Save</button>
+              <button class="primary-button" on:click={runCurrentFlow} disabled={flowRunning}>{flowRunning ? 'Running…' : 'Run flow'}</button>
+            </div>
+          </div>
+          <FlowCanvas flow={flowEditor} {savedRequests} results={flowResults} runVariables={flowRunVariables} running={flowRunning} onChange={onFlowChange} />
+        </div>
+      {:else}
       <div class="tab-strip">
         <button class="sidebar-toggle" on:click={() => sidebarVisible = !sidebarVisible} title="Toggle sidebar"><PanelLeftClose size={16} /></button>
         <div class="request-tabs">
@@ -1790,7 +1813,6 @@
               <span class="unsaved-state">{unsavedTabs[activeRequestId] ? 'Unsaved changes' : 'Saved'}</span>
             </div>
             <div class="request-actions">
-              <button class="secondary-button" on:click={openFlows}><Workflow size={15} /> Flows</button>
               <button class="secondary-button" on:click={openLoadTest} disabled={!activeRequest.url.trim()}><Activity size={15} /> Load test</button>
               <button class="secondary-button" on:click={saveActiveRequest}><Save size={15} /> Save</button>
               <button class="icon-button bordered" on:click={() => utilityModal = 'code'} title="Generate code"><Code2 size={16} /></button>
@@ -1958,6 +1980,7 @@
           <ResponseViewer {response} loading={executing} error={requestError} testResults={scriptTestResults} consoleLogs={scriptConsoleLogs} scriptError={testScriptError} />
         </div>
       {/if}
+      {/if}
     </main>
   </div>
 
@@ -1992,45 +2015,6 @@
     {/if}
     <button class="icon-button subtle" on:click={() => utilityModal = 'settings'} title="Application settings"><Settings2 size={14} /></button>
   </footer>
-
-  {#if flowOpen && flowEditor}
-    <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget && !flowRunning) flowOpen = false; }}>
-      <div class="modal flow-modal" role="dialog" aria-modal="true" aria-label="Flows">
-        <div class="modal-header">
-          <div><span class="modal-icon"><Workflow size={18} /></span><div><strong>Flows</strong><p>Chain saved requests with branching, delay, and variable nodes on a visual canvas.</p></div></div>
-          <button class="icon-button" disabled={flowRunning} on:click={() => flowOpen = false} aria-label="Close dialog"><X size={17} /></button>
-        </div>
-        <div class="flow-layout">
-          <aside class="flow-sidebar">
-            <div class="flow-sidebar-heading"><span>Saved flows</span><button on:click={createFlow} disabled={flowRunning} title="New flow"><Plus size={14} /></button></div>
-            <div class="flow-saved-list">
-              {#each workspace.flows as flow}
-                <button class:active={flow.id === flowEditor.id} disabled={flowRunning} on:click={() => editFlow(flow.id)}>
-                  <Workflow size={13} /><span><strong>{flow.name}</strong><small>{flow.nodes.length} {flow.nodes.length === 1 ? 'node' : 'nodes'}</small></span>
-                </button>
-              {/each}
-              {#if !workspace.flows.length}<p>No saved flows yet.</p>{/if}
-            </div>
-          </aside>
-          <div class="flow-editor-shell">
-            <div class="flow-name-row">
-              <label><span>Flow name</span><input bind:value={flowEditor.name} placeholder="Sign up and create project" disabled={flowRunning} /></label>
-              <label class="flow-stop-option"><input type="checkbox" bind:checked={flowEditor.stopOnError} disabled={flowRunning} /><span><strong>Stop on error</strong><small>Halt the flow after a failed node</small></span></label>
-            </div>
-            <FlowCanvas flow={flowEditor} {savedRequests} results={flowResults} runVariables={flowRunVariables} running={flowRunning} onChange={onFlowChange} />
-          </div>
-        </div>
-        <div class="modal-footer flow-footer">
-          <button class="flow-delete-button" on:click={deleteFlow} disabled={flowRunning}><Trash2 size={13} /> Delete</button>
-          {#if Object.keys(flowRunVariables).length}<span class="flow-variable-count">{Object.keys(flowRunVariables).length} runtime {Object.keys(flowRunVariables).length === 1 ? 'variable' : 'variables'}</span>{/if}
-          <div></div>
-          <button class="secondary-button" on:click={() => flowOpen = false} disabled={flowRunning}>Close</button>
-          <button class="secondary-button" on:click={() => saveFlow()} disabled={flowRunning}>Save</button>
-          <button class="primary-button" on:click={runCurrentFlow} disabled={flowRunning}>{flowRunning ? 'Running…' : 'Run flow'}</button>
-        </div>
-      </div>
-    </div>
-  {/if}
 
   {#if loadTestOpen}
     <div class="modal-backdrop" role="presentation" on:click={(event) => { if (event.target === event.currentTarget && !loadTestRunning) loadTestOpen = false; }}>

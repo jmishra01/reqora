@@ -1,9 +1,9 @@
 <script lang="ts">
   import {
     ArrowDownAZ, Check, ChevronDown, ChevronRight, Clock3, Code2, Copy, Download, Ellipsis, FilePlus2, FileUp,
-    Folder, FolderPlus, Globe2, History, Inbox, Layers3, MoveRight, Pencil, Plus, Search, Settings2, Trash2
+    Folder, FolderPlus, Globe2, History, Inbox, Layers3, MoveRight, Pencil, Plus, Search, Settings2, Trash2, Workflow
   } from '@lucide/svelte';
-  import type { ApiRequest, Collection, CollectionFolder, Environment, HistoryEntry, ReqoraWorkspace } from '../lib/types';
+  import type { ApiRequest, Collection, CollectionFolder, Environment, Flow, HistoryEntry, ReqoraWorkspace } from '../lib/types';
 
   export let workspace: ReqoraWorkspace;
   export let workspaces: ReqoraWorkspace[];
@@ -13,9 +13,13 @@
   export let onDeleteWorkspace: (workspace: ReqoraWorkspace) => void;
   export let onImportCollections: (files: FileList | null) => void;
   export let onImportCurl: () => void;
-  export let activeSection: 'collections' | 'history' | 'environments';
+  export let activeSection: 'collections' | 'history' | 'environments' | 'flows';
   export let selectedRequestId = '';
-  export let onSection: (section: 'collections' | 'history' | 'environments') => void;
+  export let selectedFlowId = '';
+  export let onSection: (section: 'collections' | 'history' | 'environments' | 'flows') => void;
+  export let onSelectFlow: (flow: Flow) => void;
+  export let onNewFlow: () => void;
+  export let onDeleteFlow: (flow: Flow) => void;
   export let onOpenRequest: (request: ApiRequest) => void;
   export let onOpenHistoryEntry: (entry: HistoryEntry) => void;
   export let onDeleteHistoryEntry: (entry: HistoryEntry) => void;
@@ -135,6 +139,9 @@
     <button class:active={activeSection === 'environments'} on:click={() => onSection('environments')}>
       <Globe2 size={17} /> Environments <span>{workspace.environments.length}</span>
     </button>
+    <button class:active={activeSection === 'flows'} on:click={() => onSection('flows')}>
+      <Workflow size={17} /> Flows <span>{workspace.flows.length}</span>
+    </button>
   </nav>
 
   <div class="sidebar-heading">
@@ -150,10 +157,12 @@
         <button class="icon-button" on:click={onImportCurl} title="Import cURL" aria-label="Import cURL"><Code2 size={15} /></button>
         <button class="icon-button" on:click={onNewCollection} title="New collection"><FolderPlus size={15} /></button>
         <button class="icon-button" on:click={() => onNewRequest()} title="New request"><Plus size={15} /></button>
-      {:else}
+      {:else if activeSection === 'environments'}
         <input class="hidden-file-input" bind:this={environmentFileInput} type="file" accept="application/json,.json" multiple on:change={(event) => { onImportEnvironments(event.currentTarget.files); event.currentTarget.value = ''; }} />
         <button class="icon-button" on:click={() => environmentFileInput.click()} title="Import environment JSON" aria-label="Import environment JSON"><Inbox size={15} /></button>
         <button class="icon-button" on:click={onNewEnvironment} title="New environment"><Plus size={15} /></button>
+      {:else}
+        <button class="icon-button" on:click={onNewFlow} title="New flow"><Plus size={15} /></button>
       {/if}
     </div>
   </div>
@@ -275,7 +284,7 @@
       {#if !workspace.history.length}
         <div class="sidebar-empty"><Clock3 size={24} /><p>Requests you send will appear here.</p></div>
       {/if}
-    {:else}
+    {:else if activeSection === 'environments'}
       {#each workspace.environments.filter(e => !query || e.name.toLowerCase().includes(query)) as environment (environment.id)}
         <div class="environment-row" class:just-imported={justImportedEnvironmentIds.includes(environment.id)}>
           <button class="environment-row-main" on:click={() => onSelectEnvironment(environment)}>
@@ -289,6 +298,19 @@
       {/each}
       {#if !workspace.environments.length}
         <div class="sidebar-empty"><Globe2 size={24} /><p>No environments yet</p><button on:click={onNewEnvironment}>Create environment</button><button on:click={() => environmentFileInput.click()}>Import environment JSON</button></div>
+      {/if}
+    {:else}
+      {#each workspace.flows.filter(f => !query || f.name.toLowerCase().includes(query)) as flow (flow.id)}
+        <div class="flow-row" class:selected={flow.id === selectedFlowId}>
+          <button class="flow-row-main" on:click={() => onSelectFlow(flow)}>
+            <div class="flow-row-icon"><Workflow size={15} /></div>
+            <span><strong>{flow.name}</strong><small>{flow.nodes.length} {flow.nodes.length === 1 ? 'node' : 'nodes'}</small></span>
+          </button>
+          <button class="icon-button" on:click={() => onDeleteFlow(flow)} title="Delete flow" aria-label={`Delete ${flow.name}`}><Trash2 size={14} /></button>
+        </div>
+      {/each}
+      {#if !workspace.flows.length}
+        <div class="sidebar-empty"><Workflow size={24} /><p>No flows yet</p><button on:click={onNewFlow}>Create flow</button></div>
       {/if}
     {/if}
   </div>

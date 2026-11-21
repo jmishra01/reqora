@@ -690,7 +690,7 @@
       ]
     });
     const output = {
-      info: { name: collection.name, description: collection.description, schema: 'https://schema.postcall.app/collection/v2.1.0/collection.json' },
+      info: { name: collection.name, description: collection.description, schema: 'https://schema.reqora.app/collection/v2.1.0/collection.json' },
       auth: toAuth(collection.auth),
       variable: toVariableList(collection.variables),
       item: [
@@ -2385,7 +2385,7 @@
           {:else}
             <div class="help-content">
               <div><kbd>⌘ ↵</kbd><span>Send the active request</span></div><div><kbd>⌘ S</kbd><span>Save the active request</span></div><div><kbd>Drag</kbd><span>Resize the request and response panels</span></div>
-              <p>Postcall is local-first. Collections, environments, and history are stored on this device.</p>
+              <p>Reqora is local-first. Collections, environments, and history are stored on this device.</p>
             </div>
           {/if}
           <div class="modal-footer"><button class="primary-button" on:click={() => utilityModal = null}>Got it</button></div>

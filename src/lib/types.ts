@@ -126,7 +126,7 @@ export type FlowExtraction = {
   template: string;
 };
 
-export type FlowNodeKind = 'start' | 'request' | 'condition' | 'delay' | 'setVariable' | 'log' | 'end';
+export type FlowNodeKind = 'start' | 'request' | 'condition' | 'delay' | 'setVariable' | 'log' | 'for' | 'collect' | 'end';
 
 export type FlowConditionOperator = 'equals' | 'notEquals' | 'contains' | 'greaterThan' | 'lessThan' | 'exists';
 
@@ -148,6 +148,13 @@ export type FlowNode = {
   variableValue?: string;
   // kind === 'log'
   logTemplate?: string;
+  // kind === 'for'
+  forListTemplate?: string;
+  forItemVariable?: string;
+  forIndexVariable?: string;
+  // kind === 'collect'
+  collectValueTemplate?: string;
+  collectResultVariable?: string;
 };
 
 export type FlowEdgePort = 'out' | 'true' | 'false';
@@ -167,12 +174,33 @@ export type Flow = {
   stopOnError: boolean;
 };
 
+export type FlowRunNodeState = 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+
+export type FlowRunNodeResult = {
+  nodeId: string;
+  state: FlowRunNodeState;
+  error?: string;
+  extracted?: Record<string, string>;
+};
+
+export type FlowRunEntry = {
+  id: string;
+  flowId: string;
+  flowName: string;
+  startedAt: string;
+  durationMs: number;
+  succeeded: boolean;
+  nodeResults: Record<string, FlowRunNodeResult>;
+  variables: Record<string, string>;
+};
+
 export type WorkspaceState = {
   collections: Collection[];
   environments: Environment[];
   activeEnvironmentId: string | null;
   history: HistoryEntry[];
   flows: Flow[];
+  flowHistory: FlowRunEntry[];
 };
 
 export type ReqoraWorkspace = WorkspaceState & {

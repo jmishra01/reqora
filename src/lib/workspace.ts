@@ -85,7 +85,8 @@ export const initialWorkspace = (): ReqoraWorkspace => ({
   ],
   activeEnvironmentId: null,
   history: [],
-  flows: []
+  flows: [],
+  flowHistory: []
 });
 
 export const blankWorkspace = (name: string): ReqoraWorkspace => ({
@@ -95,7 +96,8 @@ export const blankWorkspace = (name: string): ReqoraWorkspace => ({
   environments: [],
   activeEnvironmentId: null,
   history: [],
-  flows: []
+  flows: [],
+  flowHistory: []
 });
 
 export const initialWorkspaceStore = (): WorkspaceStore => {
@@ -121,7 +123,8 @@ export function normalizeWorkspace(value: WorkspaceState, fallbackName = 'My Wor
     environments: value.environments ?? [],
     activeEnvironmentId: value.activeEnvironmentId ?? null,
     history: (value.history ?? []).slice(0, 200),
-    flows
+    flows,
+    flowHistory: ((stored.flowHistory ?? []) as ReqoraWorkspace['flowHistory']).slice(0, 100)
   };
 }
 

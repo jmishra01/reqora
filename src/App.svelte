@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import {
     Activity, AlertTriangle, Braces, Check, Cloud, CodeXml as Code2, Command, Copy, Download, Eye, FileUp,
-    Earth as Globe2, Github, CircleQuestionMark as HelpCircle, Layers3, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Search, Settings2,
+    Earth as Globe2, Github, CircleQuestionMark as HelpCircle, History, Layers3, Moon, PanelLeftClose, Play, Plus, RefreshCw, Save, Search, Settings2,
     Sparkles, Sun, X, Trash2
   } from '@lucide/svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -21,9 +21,9 @@
   import type { CodeLanguage } from './lib/codegen';
   import { blankWorkspace, initialWorkspaceStore, normalizeRequest, normalizeWorkspaceStore } from './lib/workspace';
   import { blankFlow, blankRequest, blankRow, uid } from './lib/types';
-  import type { ApiRequest, Collection, CollectionFolder, Environment, Flow, FlowExtraction, FlowNode, HistoryEntry, KeyValue, ReqoraWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
-  import type { FlowNodeHandlers, FlowNodeResult } from './lib/flowRunner';
-  import { runFlow } from './lib/flowRunner';
+  import type { ApiRequest, Collection, CollectionFolder, Environment, Flow, FlowExtraction, FlowNode, FlowRunEntry, HistoryEntry, KeyValue, ReqoraWorkspace, RequestAuth, RequestInput, ResponseData } from './lib/types';
+  import type { FlowIssue, FlowNodeHandlers, FlowNodeResult } from './lib/flowRunner';
+  import { runFlow, validateFlow } from './lib/flowRunner';
   import { getLinkedRepository, type SyncConflict, type SyncError } from './lib/sync';
   import { runPreRequestScript, runTestScript } from './lib/scripting';
   import type { ScriptConsoleEntry, ScriptTestOutcome } from './lib/scripting';
@@ -129,6 +129,7 @@
   let flowRunning = false;
   let flowResults: Record<string, FlowNodeResult> = {};
   let flowRunVariables: Record<string, string> = {};
+  let flowHistoryOpen = false;
 
   $: activeRequest = openRequests.find((request) => request.id === activeRequestId) ?? openRequests[0];
   $: activeEnvironment = workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId);
@@ -181,6 +182,7 @@
     ...collection.requests.map((request) => ({ request, label: `${collection.name} / ${request.name}` })),
     ...collection.folders.flatMap((folder) => folder.requests.map((request) => ({ request, label: `${collection.name} / ${folder.name} / ${request.name}` })))
   ]);
+  $: flowIssues = flowEditor ? validateFlow(flowEditor, (requestId) => savedRequests.some((item) => item.request.id === requestId)) : [];
   $: commandActions = [
     { id: 'request' as const, label: 'New request', detail: 'Create an unsaved HTTP request', shortcut: '⌘ N' },
     { id: 'collection' as const, label: 'New collection', detail: 'Add a local collection', shortcut: '' },
@@ -1282,15 +1284,13 @@
   async function runCurrentFlow() {
     if (!flowEditor || flowRunning) return;
     const flowToRun = flowEditor;
-    const requestNodes = flowToRun.nodes.filter((node) => node.kind === 'request');
-    const invalidRequestNode = requestNodes.find((node) => !savedRequestById(node.requestId ?? ''));
-    if (invalidRequestNode) { showToast('Choose a saved request for every request node'); return; }
-    const invalidExtraction = requestNodes.flatMap((node) => node.extractions ?? []).find((item) => !item.name.trim() || (item.source === 'header' && !item.path.trim()));
-    if (invalidExtraction) { showToast('Every output needs a variable name and every header output needs a header name'); return; }
+    const blockingIssue = flowIssues.find((issue) => issue.severity === 'error');
+    if (blockingIssue) { showToast(blockingIssue.message); return; }
     saveFlow(false);
     flowRunning = true;
     flowResults = {};
     flowRunVariables = {};
+    const runStartedAt = Date.now();
     const historyEntries: HistoryEntry[] = [];
     const handlers: FlowNodeHandlers = {
       request: async (node, vars) => {
@@ -1322,9 +1322,30 @@
     flowRunVariables = await runFlow(flowToRun, handlers, (result) => { flowResults = { ...flowResults, [result.nodeId]: result }; }, flowToRun.stopOnError);
     if (historyEntries.length) {
       workspace.history = [...historyEntries.reverse(), ...workspace.history].slice(0, 200);
-      commitWorkspace();
     }
+    const runEntry: FlowRunEntry = {
+      id: uid(),
+      flowId: flowToRun.id,
+      flowName: flowToRun.name,
+      startedAt: new Date(runStartedAt).toISOString(),
+      durationMs: Date.now() - runStartedAt,
+      succeeded: !Object.values(flowResults).some((result) => result.state === 'failed'),
+      nodeResults: Object.fromEntries(Object.entries(flowResults).map(([nodeId, result]) => [nodeId, { nodeId: result.nodeId, state: result.state, error: result.error, extracted: result.extracted }])),
+      variables: flowRunVariables
+    };
+    workspace.flowHistory = [runEntry, ...workspace.flowHistory].slice(0, 100);
+    commitWorkspace();
     flowRunning = false;
+  }
+
+  function viewFlowRun(entry: FlowRunEntry) {
+    flowResults = Object.fromEntries(Object.entries(entry.nodeResults).map(([nodeId, result]) => [nodeId, { ...result }]));
+    flowRunVariables = entry.variables;
+  }
+
+  function deleteFlowRun(entry: FlowRunEntry) {
+    workspace.flowHistory = workspace.flowHistory.filter((item) => item.id !== entry.id);
+    commitWorkspace();
   }
 
   function percentile(values: number[], fraction: number) {
@@ -1777,11 +1798,31 @@
             <div class="flow-section-actions">
               <button class="flow-delete-button" on:click={() => flowEditor && deleteFlow(flowEditor)} disabled={flowRunning}><Trash2 size={13} /> Delete</button>
               {#if Object.keys(flowRunVariables).length}<span class="flow-variable-count">{Object.keys(flowRunVariables).length} runtime {Object.keys(flowRunVariables).length === 1 ? 'variable' : 'variables'}</span>{/if}
+              <div class="flow-history-wrap">
+                <button class="icon-button bordered" on:click={() => flowHistoryOpen = !flowHistoryOpen} title="Run history" aria-label="Run history"><History size={15} /></button>
+                {#if flowHistoryOpen}
+                  {@const runs = workspace.flowHistory.filter((entry) => entry.flowId === flowEditor?.id)}
+                  <div class="flow-history-panel">
+                    <div class="flow-history-heading">Run history</div>
+                    {#each runs as entry (entry.id)}
+                      <div class="flow-history-row">
+                        <button on:click={() => viewFlowRun(entry)}>
+                          <span class="flow-history-state" class:failed={!entry.succeeded}>{entry.succeeded ? 'Passed' : 'Failed'}</span>
+                          <span class="flow-history-time">{new Date(entry.startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                          <span class="flow-history-duration">{entry.durationMs} ms</span>
+                        </button>
+                        <button class="icon-button" on:click={() => deleteFlowRun(entry)} title="Delete this run" aria-label="Delete this run"><X size={13} /></button>
+                      </div>
+                    {/each}
+                    {#if !runs.length}<p class="flow-history-empty">No runs yet for this flow.</p>{/if}
+                  </div>
+                {/if}
+              </div>
               <button class="secondary-button" on:click={() => saveFlow()} disabled={flowRunning}>Save</button>
               <button class="primary-button" on:click={runCurrentFlow} disabled={flowRunning}>{flowRunning ? 'Running…' : 'Run flow'}</button>
             </div>
           </div>
-          <FlowCanvas flow={flowEditor} {savedRequests} results={flowResults} runVariables={flowRunVariables} running={flowRunning} onChange={onFlowChange} />
+          <FlowCanvas flow={flowEditor} {savedRequests} results={flowResults} runVariables={flowRunVariables} running={flowRunning} issues={flowIssues} onChange={onFlowChange} />
         </div>
       {:else}
       <div class="tab-strip">

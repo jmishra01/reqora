@@ -1,15 +1,19 @@
 <script lang="ts">
-  import { CirclePlay, Clock, Flag, GitBranch, Maximize, Minus, Plus, Terminal, Trash2, Variable, X, Zap } from '@lucide/svelte';
+  import { CirclePlay, Clock, Combine, Flag, GitBranch, Maximize, Minus, Plus, Repeat, Terminal, TriangleAlert, Trash2, Variable, X, Zap } from '@lucide/svelte';
   import type { ApiRequest, Flow, FlowConditionOperator, FlowEdge, FlowEdgePort, FlowNode, FlowNodeKind } from '../lib/types';
   import { blankFlowExtraction, uid } from '../lib/types';
-  import type { FlowNodeResult } from '../lib/flowRunner';
+  import type { FlowIssue, FlowNodeResult } from '../lib/flowRunner';
 
   export let flow: Flow;
   export let savedRequests: Array<{ request: ApiRequest; label: string }>;
   export let results: Record<string, FlowNodeResult> = {};
   export let runVariables: Record<string, string> = {};
   export let running = false;
+  export let issues: FlowIssue[] = [];
   export let onChange: () => void = () => {};
+
+  let issuesOpen = false;
+  $: errorNodeIds = new Set(issues.filter((issue) => issue.severity === 'error').map((issue) => issue.nodeId));
 
   const NODE_WIDTH = 200;
   const NODE_HEIGHT = 68;
@@ -21,6 +25,8 @@
     delay: { label: 'Delay', icon: Clock },
     setVariable: { label: 'Set variable', icon: Variable },
     log: { label: 'Log', icon: Terminal },
+    for: { label: 'For each', icon: Repeat },
+    collect: { label: 'Collect', icon: Combine },
     end: { label: 'End', icon: Flag }
   };
 
@@ -132,6 +138,10 @@
         return `${node.variableName || 'variable'} = ${node.variableValue ?? ''}`;
       case 'log':
         return node.logTemplate || '{{value}}';
+      case 'for':
+        return `For each ${node.forItemVariable || 'item'} in ${node.forListTemplate || '—'}`;
+      case 'collect':
+        return `Collect ${node.collectValueTemplate || '{{item}}'} as ${node.collectResultVariable || 'results'}`;
       default:
         return '';
     }
@@ -153,7 +163,11 @@
             ? { ...base, variableName: '', variableValue: '' }
             : kind === 'log'
               ? { ...base, logTemplate: '{{value}}' }
-              : base;
+              : kind === 'for'
+                ? { ...base, forListTemplate: '{{items}}', forItemVariable: 'item', forIndexVariable: 'index' }
+                : kind === 'collect'
+                  ? { ...base, collectValueTemplate: '{{item}}', collectResultVariable: 'results' }
+                  : base;
     flow.nodes = [...flow.nodes, node];
     selectedNodeId = node.id;
     onChange();
@@ -276,6 +290,8 @@
       <button on:click={() => addNode('delay')} disabled={running} title="Add a delay node"><Clock size={13} /> Delay</button>
       <button on:click={() => addNode('setVariable')} disabled={running} title="Add a set-variable node"><Variable size={13} /> Set variable</button>
       <button on:click={() => addNode('log')} disabled={running} title="Add a log node"><Terminal size={13} /> Log</button>
+      <button on:click={() => addNode('for')} disabled={running} title="Add a for-each node"><Repeat size={13} /> For each</button>
+      <button on:click={() => addNode('collect')} disabled={running} title="Add a collect node"><Combine size={13} /> Collect</button>
     </div>
     <div class="flow-zoom-controls">
       <button on:click={() => zoomBy(-0.1)} title="Zoom out"><Minus size={13} /></button>
@@ -284,6 +300,25 @@
       <button on:click={resetView} title="Reset view"><Maximize size={13} /></button>
     </div>
   </div>
+  {#if issues.length}
+    <div class="flow-issues">
+      <button class="flow-issues-summary" on:click={() => issuesOpen = !issuesOpen}>
+        <TriangleAlert size={13} />
+        {issues.length} {issues.length === 1 ? 'issue' : 'issues'}
+        {#if errorNodeIds.size} · fix errors before running{/if}
+      </button>
+      {#if issuesOpen}
+        <div class="flow-issues-list">
+          {#each issues as issue, index (index)}
+            <button class="flow-issue-row" class:error={issue.severity === 'error'} on:click={() => { selectNode(issue.nodeId); issuesOpen = false; }}>
+              <span class="flow-issue-node">{NODE_META[nodeById(issue.nodeId)?.kind ?? 'log'].label}</span>
+              <span>{issue.message}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
   <div class="flow-body">
     <div class="flow-viewport" bind:this={viewportEl} on:wheel={onWheel} role="presentation">
       <div class="flow-world" style={`transform: translate(${panX}px, ${panY}px) scale(${zoom})`} on:pointerdown={beginPan} role="presentation">
@@ -313,6 +348,7 @@
             class:passed={result?.state === 'passed'}
             class:failed={result?.state === 'failed'}
             class:skipped={result?.state === 'skipped'}
+            class:invalid={errorNodeIds.has(node.id)}
             style={`left:${node.position.x}px; top:${node.position.y}px; width:${NODE_WIDTH}px; height:${NODE_HEIGHT}px`}
           >
             {#if hasInput(node)}<span class="flow-port flow-port-in" role="presentation" on:pointerup|stopPropagation={() => completeConnection(node.id)}></span>{/if}
@@ -376,6 +412,15 @@
           <label><span>Value</span><input bind:value={selectedNode.variableValue} on:input={touchNodes} placeholder={'{{existingVar}}-suffix'} disabled={running} /></label>
         {:else if selectedNode.kind === 'log'}
           <label><span>Message template</span><textarea bind:value={selectedNode.logTemplate} on:input={touchNodes} placeholder={'{{value}}'} disabled={running}></textarea></label>
+        {:else if selectedNode.kind === 'for'}
+          <label><span>List</span><input bind:value={selectedNode.forListTemplate} on:input={touchNodes} placeholder={'{{items}}'} disabled={running} /></label>
+          <label><span>Item variable</span><input bind:value={selectedNode.forItemVariable} on:input={touchNodes} placeholder="item" disabled={running} /></label>
+          <label><span>Index variable</span><input bind:value={selectedNode.forIndexVariable} on:input={touchNodes} placeholder="index" disabled={running} /></label>
+          <p class="flow-properties-hint">Connect this node's output to the start of the loop body. The body must reach a Collect node.</p>
+        {:else if selectedNode.kind === 'collect'}
+          <label><span>Value per iteration</span><input bind:value={selectedNode.collectValueTemplate} on:input={touchNodes} placeholder={'{{item}}'} disabled={running} /></label>
+          <label><span>Result variable</span><input bind:value={selectedNode.collectResultVariable} on:input={touchNodes} placeholder="results" disabled={running} /></label>
+          <p class="flow-properties-hint">Pairs with the nearest For each node upstream. Its output continues after the loop.</p>
         {:else}
           <p class="flow-properties-hint">{selectedNode.kind === 'start' ? 'Every flow begins here. Drag a connection out to the next node.' : 'Every flow ends here.'}</p>
         {/if}
